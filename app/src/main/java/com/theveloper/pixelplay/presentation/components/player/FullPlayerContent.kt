@@ -854,7 +854,13 @@ fun FullPlayerContent(
             immersiveLyricsEnabled = immersiveLyricsEnabled,
             immersiveLyricsTimeout = immersiveLyricsTimeout,
             isImmersiveTemporarilyDisabled = isImmersiveTemporarilyDisabled,
-            onSetImmersiveTemporarilyDisabled = { playerViewModel.setImmersiveTemporarilyDisabled(it) }
+            onSetImmersiveTemporarilyDisabled = { playerViewModel.setImmersiveTemporarilyDisabled(it) },
+            isShuffleEnabled = isShuffleEnabled,
+            repeatMode = repeatMode,
+            isFavoriteProvider = isFavoriteProvider,
+            onShuffleToggle = onShuffleToggle,
+            onRepeatToggle = onRepeatToggle,
+            onFavoriteToggle = onFavoriteToggle
         )
     }
 

@@ -31,6 +31,7 @@ fun ToggleSegmentButton(
     activeColor: Color,
     inactiveColor: Color = Color.Gray,
     activeContentColor: Color = LocalMaterialTheme.current.onPrimary,
+    inactiveContentColor: Color = LocalMaterialTheme.current.onSurfaceVariant,
     activeCornerRadius: Dp = 8.dp,
     onClick: () -> Unit,
     iconId: Int,
@@ -47,7 +48,7 @@ fun ToggleSegmentButton(
         Icon(
             painter = painterResource(iconId),
             contentDescription = contentDesc,
-            tint = if (active) activeContentColor else LocalMaterialTheme.current.primary,
+            tint = if (active) activeContentColor else inactiveContentColor,
             modifier = Modifier.size(24.dp)
         )
     }
@@ -60,6 +61,7 @@ fun ToggleSegmentButton(
     activeColor: Color,
     inactiveColor: Color = Color.Gray,
     activeContentColor: Color = LocalMaterialTheme.current.onPrimary,
+    inactiveContentColor: Color = LocalMaterialTheme.current.onSurfaceVariant,
     activeCornerRadius: Dp = 8.dp,
     onClick: () -> Unit,
     imageVector: ImageVector,
@@ -76,7 +78,7 @@ fun ToggleSegmentButton(
         Icon(
             imageVector = imageVector,
             contentDescription = contentDesc,
-            tint = if (active) activeContentColor else LocalMaterialTheme.current.primary,
+            tint = if (active) activeContentColor else inactiveContentColor,
             modifier = Modifier.size(24.dp)
         )
     }

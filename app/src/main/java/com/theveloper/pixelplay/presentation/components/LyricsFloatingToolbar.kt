@@ -52,24 +52,17 @@ fun LyricsFloatingToolbar(
     onNavigateBack: () -> Unit,
     showSyncedLyrics: Boolean?,
     onShowSyncedLyricsChange: (Boolean) -> Unit,
-    lyrics: Lyrics?,
-    onSaveLyricsAsLrc: () -> Unit,
-    onResetImportedLyrics: () -> Unit,
-    isSyncControlsVisible: Boolean,
-    onToggleSyncControls: () -> Unit,
+    onMoreClick: () -> Unit,
     backgroundColor: Color,
     onBackgroundColor: Color,
     accentColor: Color,
-    onAccentColor: Color,
-    isImmersiveTemporarilyDisabled: Boolean = false,
-    onSetImmersiveTemporarilyDisabled: ((Boolean) -> Unit)? = null
+    onAccentColor: Color
 ) {
     if (showSyncedLyrics == null) return
 
     Row(
         modifier = modifier
             .fillMaxWidth(),
-            //.padding(start = 10.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -122,114 +115,18 @@ fun LyricsFloatingToolbar(
         
         Spacer(modifier = Modifier.width(8.dp))
 
-        var expanded by remember { mutableStateOf(false) }
         IconButton(
             colors = IconButtonDefaults.iconButtonColors(
                 containerColor = backgroundColor,
                 contentColor = onBackgroundColor
             ),
-            onClick = { expanded = !expanded }
+            onClick = onMoreClick
         ) {
             Icon(
                 imageVector = Icons.Filled.MoreVert,
                 contentDescription = "Lyrics options",
                 tint = onBackgroundColor
             )
-            DropdownMenu(
-                shape = AbsoluteSmoothCornerShape(
-                    cornerRadiusBL = 20.dp,
-                    smoothnessAsPercentTL = 60,
-                    cornerRadiusBR = 20.dp,
-                    smoothnessAsPercentTR = 60,
-                    cornerRadiusTL = 20.dp,
-                    smoothnessAsPercentBL = 60,
-                    cornerRadiusTR = 20.dp,
-                    smoothnessAsPercentBR = 60
-                ),
-                containerColor = backgroundColor,
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                // Save lyrics as .lrc option
-                DropdownMenuItem(
-                    leadingIcon = {
-                        Icon(
-                            painter = painterResource(R.drawable.outline_save_24),
-                            contentDescription = null
-                        )
-                    },
-                    text = { Text(text = stringResource(R.string.save_lyrics_dialog_title).substringBefore("?")) }, // quick hack, verify strings
-                    enabled = lyrics != null,
-                    onClick = {
-                        expanded = false
-                        onSaveLyricsAsLrc()
-                    }
-                )
-                // Reset imported lyrics option
-                DropdownMenuItem(
-                    leadingIcon = {
-                        Icon(
-                            painter = painterResource(R.drawable.outline_restart_alt_24),
-                            contentDescription = null
-                        )
-                    },
-                    text = { Text(text = stringResource(R.string.reset_imported_lyrics)) },
-                    onClick = {
-                        expanded = false
-                        onResetImportedLyrics()
-                    }
-                )
-
-                // Sync Controls Toggle
-                if (showSyncedLyrics) {
-                    DropdownMenuItem(
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Tune,
-                                contentDescription = null
-                            )
-                        },
-                        text = { Text(text = if (isSyncControlsVisible) "Hide Sync Controls" else "Adjust Sync") },
-                        onClick = {
-                            expanded = false
-                            onToggleSyncControls()
-                        }
-                    )
-
-                    HorizontalDivider(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .clip(CircleShape),
-                        thickness = 2.dp,
-                        color = onBackgroundColor.copy(alpha = 0.4f)
-                    )
-
-
-                    // Immersive Mode Temporary Disable
-                    DropdownMenuItem(
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Immersive Off (Once)", style = MaterialTheme.typography.bodyMedium)
-                                Spacer(Modifier.width(8.dp))
-                                Switch(
-                                    modifier = Modifier.scale(0.8f),
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = onAccentColor,
-                                        checkedTrackColor = accentColor,
-                                    ),
-                                    checked = isImmersiveTemporarilyDisabled,
-                                    onCheckedChange = null, // Handled by parent click
-                                )
-                            }
-                        },
-                        onClick = {
-                            onSetImmersiveTemporarilyDisabled?.invoke(!isImmersiveTemporarilyDisabled)
-                            // Keep menu open for toggling? Or close it? Usually better to keep open for switches.
-                            // But for now let's just letting it handle the click.
-                        }
-                    )
-                }
-            }
         }
     }
 }

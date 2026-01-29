@@ -12,6 +12,12 @@ import androidx.compose.ui.layout.ContentScale
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.AutoScrollingText
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material3.rememberModalBottomSheetState
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -106,6 +112,7 @@ import com.theveloper.pixelplay.presentation.components.snapping.SnapperLayoutIn
 import com.theveloper.pixelplay.presentation.components.snapping.rememberLazyListSnapperLayoutInfo
 import com.theveloper.pixelplay.presentation.components.snapping.rememberSnapperFlingBehavior
 import com.theveloper.pixelplay.utils.LyricsUtils
+import com.theveloper.pixelplay.presentation.components.subcomps.LyricsMoreBottomSheet
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -153,6 +160,13 @@ fun LyricsSheet(
     immersiveLyricsTimeout: Long,
     isImmersiveTemporarilyDisabled: Boolean,
     onSetImmersiveTemporarilyDisabled: (Boolean) -> Unit,
+    // BottomToggleRow Params
+    isShuffleEnabled: Boolean,
+    repeatMode: Int,
+    isFavoriteProvider: () -> Boolean,
+    onShuffleToggle: () -> Unit,
+    onRepeatToggle: () -> Unit,
+    onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier,
     swipeThreshold: Dp = 100.dp,
     highlightZoneFraction: Float = 0.08f, // Reduced from 0.22 for less padding
@@ -189,6 +203,10 @@ fun LyricsSheet(
     // Immersive Mode State
     var immersiveMode by remember { mutableStateOf(false) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var showMoreSheet by remember { mutableStateOf(false) }
+    val moreSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true
+    )
 
     // Swipe Gesture State
     val hapticFeedback = LocalHapticFeedback.current
@@ -440,7 +458,8 @@ fun LyricsSheet(
                             .wrapContentWidth()
                             .animateContentSize(), // Animate width changes
                         backgroundColor = backgroundColor, // Distinct solid background
-                        contentColor = contentColor
+                        contentColor = contentColor,
+                        isPlaying = isPlaying
                     )
                 }
 
@@ -579,6 +598,17 @@ fun LyricsSheet(
                         .fillMaxWidth()
                         .background(containerColor)
                         .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    // Reset timer on any touch down or move in this area
+                                    if (event.changes.any { it.pressed }) {
+                                         resetImmersiveTimer()
+                                    }
+                                }
+                            }
+                        }
                 ) {
                 // Sync Offset Controls (Visible only if synced lyrics are shown AND enabled via some toggle, 
                 // but user didn't specify a toggle for this in the new toolbar, just "encolumnada". 
@@ -672,27 +702,64 @@ fun LyricsSheet(
                     modifier = Modifier.padding(horizontal = 0.dp),
                     showSyncedLyrics = showSyncedLyrics,
                     onShowSyncedLyricsChange = { showSyncedLyrics = it },
-                    lyrics = lyrics,
-                    onSaveLyricsAsLrc = { showSaveLyricsDialog = true },
-                    onResetImportedLyrics = {
-                        wasResetTriggered = true
-                        resetLyricsForCurrentSong()
-                    },
                     onNavigateBack = {
                         onBackClick()
                     },
-                    isSyncControlsVisible = showSyncControls,
-                    onToggleSyncControls = { showSyncControls = !showSyncControls },
+                    onMoreClick = { showMoreSheet = true },
                     backgroundColor = backgroundColor,
                     onBackgroundColor = onBackgroundColor,
                     accentColor = accentColor,
-                    onAccentColor = onAccentColor,
-                    isImmersiveTemporarilyDisabled = isImmersiveTemporarilyDisabled,
-                    onSetImmersiveTemporarilyDisabled = onSetImmersiveTemporarilyDisabled
+                    onAccentColor = onAccentColor
                 )
              }
             }
         }
+
+        if (showMoreSheet) {
+            LyricsMoreBottomSheet(
+                onDismissRequest = { showMoreSheet = false },
+                sheetState = moreSheetState,
+                lyrics = lyrics,
+                showSyncedLyrics = showSyncedLyrics == true,
+                isSyncControlsVisible = showSyncControls,
+                onSaveLyricsAsLrc = { showSaveLyricsDialog = true },
+                onResetImportedLyrics = {
+                    wasResetTriggered = true
+                    resetLyricsForCurrentSong()
+                },
+                onToggleSyncControls = {
+                    resetImmersiveTimer()
+                    showSyncControls = !showSyncControls
+                },
+                isImmersiveTemporarilyDisabled = isImmersiveTemporarilyDisabled,
+                onSetImmersiveTemporarilyDisabled = {
+                    resetImmersiveTimer()
+                    onSetImmersiveTemporarilyDisabled(it)
+                },
+                isShuffleEnabled = isShuffleEnabled,
+                repeatMode = repeatMode,
+                isFavoriteProvider = isFavoriteProvider,
+                onShuffleToggle = {
+                    resetImmersiveTimer()
+                    onShuffleToggle()
+                },
+                onRepeatToggle = {
+                    resetImmersiveTimer()
+                    onRepeatToggle()
+                },
+                onFavoriteToggle = {
+                    resetImmersiveTimer()
+                    onFavoriteToggle()
+                },
+//                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+//                contentColor = MaterialTheme.colorScheme.onSurface,
+//                accentColor = MaterialTheme.colorScheme.primary,
+//                onAccentColor = MaterialTheme.colorScheme.onPrimary,
+//                tertiaryColor = MaterialTheme.colorScheme.tertiary,
+//                onTertiaryColor = MaterialTheme.colorScheme.onTertiary
+            )
+        }
+
 
        // Show Controls Button (Overlay)
        AnimatedVisibility(
@@ -1127,35 +1194,55 @@ private fun LyricsTrackInfo(
     song: Song?,
     modifier: Modifier = Modifier,
     backgroundColor: Color,
-    contentColor: Color
+    contentColor: Color,
+    isPlaying: Boolean
 ) {
     if (song == null) return
 
     val albumShape = CircleShape
-//    val albumShape = AbsoluteSmoothCornerShape(
-//        cornerRadiusTR = 10.dp,
-//        smoothnessAsPercentTL = 60,
-//        cornerRadiusTL = 10.dp,
-//        smoothnessAsPercentTR = 60,
-//        cornerRadiusBR = 10.dp,
-//        smoothnessAsPercentBL = 60,
-//        cornerRadiusBL = 10.dp,
-//        smoothnessAsPercentBR = 60
-//    )
+
+    val infiniteTransition = rememberInfiniteTransition(label = "vinylRotation")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing)
+        ),
+        label = "rotation"
+    )
+
+    // Helper state to stop rotation when paused, but we want it to pause in place?
+    // Using infiniteTransition.animateFloat will reset on recomposition if spec changes or stops.
+    // For a realistic vinyl pause, we need a manual Animatable that loops.
+    // But for simplicity requested: "Animate the cover art to rotate... when music is playing".
+    // If we just use conditional Modifier.graphicsLayer rotation, it might jump.
+    // Let's use a simpler approach: if isPlaying, rotate.
+    
+    // Better approach for pausing rotation in place is non-trivial without a dedicated running time state.
+    // Given the constraints, I will use a simple AnimatedVisibility or just let it reset, OR
+    // use a monotonic clock if possible.
+    // Let's stick to infinite transition for running, and maybe 0f for static?
+    // Actually, user said "simulate a vinyl record". This implies continuous storage of rotation?
+    // I'll try to implement continuous rotation.
+    
+    val currentRotation = remember { Animatable(0f) }
+    
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            // Spin forever
+            while (true) {
+                currentRotation.animateTo(
+                    targetValue = currentRotation.value + 360f,
+                    animationSpec = tween(4000, easing = LinearEasing)
+                )
+            }
+        } else {
+             currentRotation.stop()
+        }
+    }
 
     Row(
         modifier = modifier,
-//            .background(
-//                brush = Brush.verticalGradient(
-//                    colors = listOf(
-//                        backgroundColor,
-//                        backgroundColor,
-//                        backgroundColor.copy(alpha = 0.8f),
-//                        Color.Transparent
-//                    )
-//                )
-//            )
-            //.padding(top = 24.dp, bottom = 24.dp, start = 24.dp, end = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -1166,6 +1253,9 @@ private fun LyricsTrackInfo(
             modifier = Modifier
                 .size(66.dp)
                 .padding(6.dp)
+                .graphicsLayer {
+                    rotationZ = currentRotation.value % 360f
+                }
                 .clip(albumShape),
             contentScale = ContentScale.Crop
         )
@@ -1203,7 +1293,7 @@ private fun LyricsTrackInfo(
                 .padding(start = 8.dp, end = 18.dp)
                 .size(width = 18.dp, height = 16.dp),
             color = contentColor,
-            isPlaying = true
+            isPlaying = isPlaying
         )
     }
 }
