@@ -36,6 +36,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
@@ -43,6 +44,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import kotlinx.collections.immutable.ImmutableList
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LibrarySongsTab(
@@ -64,7 +66,7 @@ fun LibrarySongsTab(
             // Initial loading - show skeleton placeholders
             LazyColumn(
                 modifier = Modifier
-                    .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
+                    .padding(start = 12.dp, end = 24.dp, bottom = 6.dp)
                     .clip(
                         RoundedCornerShape(
                             topStart = 26.dp,
@@ -130,53 +132,63 @@ fun LibrarySongsTab(
                         )
                     }
                 ) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 26.dp,
-                                    topEnd = 26.dp,
-                                    bottomStart = PlayerSheetCollapsedCornerRadius,
-                                    bottomEnd = PlayerSheetCollapsedCornerRadius
-                                )
-                            ),
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
-                    ) {
-                        item(key = "songs_top_spacer") { Spacer(Modifier.height(0.dp)) }
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
+                                .clip(
+                                    RoundedCornerShape(
+                                        topStart = 26.dp,
+                                        topEnd = 26.dp,
+                                        bottomStart = PlayerSheetCollapsedCornerRadius,
+                                        bottomEnd = PlayerSheetCollapsedCornerRadius
+                                    )
+                                ),
+                            state = listState,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
+                        ) {
+                            item(key = "songs_top_spacer") { Spacer(Modifier.height(0.dp)) }
 
-                        items(
-                            items = songs,
-                            key = { "song_${it.id}" },
-                            contentType = { "song" }
-                        ) { song ->
-                            val isPlayingThisSong = song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
-                            
-                            val rememberedOnMoreOptionsClick: (Song) -> Unit = remember(onMoreOptionsClick) {
-                                { songFromListItem -> onMoreOptionsClick(songFromListItem) }
-                            }
-                            val rememberedOnClick: () -> Unit = remember(song) {
-                                { 
-                                  // Play using showAndPlaySong but passing the SORTED list as queue
-                                  // Important: We should pass 'songs' as the queue context
-                                  // But showAndPlaySong might expect paginated logic in VM?
-                                  // PlayerViewModel logic: showAndPlaySong(song, queue, name).
-                                  // Usually calls playSongs(queue, song). If we pass 'songs', it plays in sorted order!
-                                  playerViewModel.showAndPlaySong(song, songs, "Library") 
+                            items(
+                                items = songs,
+                                key = { "song_${it.id}" },
+                                contentType = { "song" }
+                            ) { song ->
+                                val isPlayingThisSong = song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
+                                
+                                val rememberedOnMoreOptionsClick: (Song) -> Unit = remember(onMoreOptionsClick) {
+                                    { songFromListItem -> onMoreOptionsClick(songFromListItem) }
                                 }
-                            }
+                                val rememberedOnClick: () -> Unit = remember(song) {
+                                    { 
+                                      playerViewModel.showAndPlaySong(song, songs, "Library") 
+                                    }
+                                }
 
-                            EnhancedSongListItem(
-                                song = song,
-                                isPlaying = isPlayingThisSong,
-                                isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                                isLoading = false,
-                                onMoreOptionsClick = rememberedOnMoreOptionsClick,
-                                onClick = rememberedOnClick
-                            )
+                                EnhancedSongListItem(
+                                    song = song,
+                                    isPlaying = isPlayingThisSong,
+                                    isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                                    isLoading = false,
+                                    onMoreOptionsClick = rememberedOnMoreOptionsClick,
+                                    onClick = rememberedOnClick
+                                )
+                            }
                         }
+                        
+                        // ScrollBar Overlay
+                        val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong()) 
+                            bottomBarHeight + MiniPlayerHeight + 16.dp 
+                        else 
+                            bottomBarHeight + 16.dp
+
+                        com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
+                            listState = listState
+                        )
                     }
                 }
                 // Top gradient fade effect

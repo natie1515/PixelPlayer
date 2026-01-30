@@ -109,6 +109,7 @@ import com.theveloper.pixelplay.presentation.components.NavBarContentHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
 import com.theveloper.pixelplay.presentation.components.QueuePlaylistSongItem
 import com.theveloper.pixelplay.presentation.components.SongPickerBottomSheet
+import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.SongInfoBottomSheet
 import com.theveloper.pixelplay.presentation.navigation.Screen
@@ -530,101 +531,125 @@ fun PlaylistDetailScreen(
                         }
                     }
                 } else {
-                    LazyColumn(
-                        state = listState,
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .weight(1f)
-                            .padding(horizontal = 10.dp)
-                            .clip(
-                                AbsoluteSmoothCornerShape(
-                                    cornerRadiusTR = 32.dp,
-                                    smoothnessAsPercentTR = 60,
-                                    cornerRadiusTL = 32.dp,
-                                    smoothnessAsPercentTL = 60,
-                                )
-                            )
-                            .background(color = MaterialTheme.colorScheme.surfaceContainerHigh),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(
-                            top = 12.dp,
-                            bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp
-                        )
+                            //.padding(horizontal = 10.dp)
                     ) {
-                        itemsIndexed(
-                            localReorderableSongs,
-                            key = { _, item -> item.id }) { _, song ->
-                            ReorderableItem(
-                                state = reorderableState,
-                                key = song.id,
-                            ) { isDragging ->
-                                val scale by animateFloatAsState(
-                                    if (isDragging) 1.05f else 1f,
-                                    label = "scale"
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(
+                                    AbsoluteSmoothCornerShape(
+                                        cornerRadiusTR = 32.dp,
+                                        smoothnessAsPercentTR = 60,
+                                        cornerRadiusTL = 32.dp,
+                                        smoothnessAsPercentTL = 60,
+                                    )
                                 )
-
-                                QueuePlaylistSongItem(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 0.dp)
-                                        .graphicsLayer {
-                                            scaleX = scale
-                                            scaleY = scale
-                                        },
-                                    onClick = {
-                                        playerViewModel.playSongs(
-                                            localReorderableSongs,
-                                            song,
-                                            currentPlaylist.name,
-                                            currentPlaylist.id
-                                        )
-                                    },
-                                    song = song,
-                                    isCurrentSong = playerStableState.currentSong?.id == song.id,
-                                    isPlaying = playerStableState.isPlaying,
-                                    isDragging = isDragging,
-                                    onRemoveClick = {
-                                        if (!isFolderPlaylist) {
-                                            currentPlaylist.let {
-                                                playlistViewModel.removeSongFromPlaylist(it.id, song.id)
-                                            }
-                                        }
-                                    },
-                                    isFromPlaylist = true,
-                                    isReorderModeEnabled = isReorderModeEnabled,
-                                    isDragHandleVisible = isReorderModeEnabled,
-                                    isRemoveButtonVisible = isRemoveModeEnabled,
-                                    onMoreOptionsClick = stableOnMoreOptionsClick,
-                                    dragHandle = {
-                                        IconButton(
-                                            onClick = {},
-                                            modifier = Modifier
-                                                .draggableHandle(
-                                                    onDragStarted = {
-                                                        ViewCompat.performHapticFeedback(
-                                                            view,
-                                                            HapticFeedbackConstantsCompat.GESTURE_START
-                                                        )
-                                                    },
-                                                    onDragStopped = {
-                                                        ViewCompat.performHapticFeedback(
-                                                            view,
-                                                            HapticFeedbackConstantsCompat.GESTURE_END
-                                                        )
-                                                    }
-                                                )
-                                                .size(40.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.DragIndicator,
-                                                contentDescription = "Reorder song",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
+                                .background(color = MaterialTheme.colorScheme.surfaceContainerHigh),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(
+                                top = 12.dp,
+                                bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp,
+                                end = if (listState.canScrollForward || listState.canScrollBackward) 24.dp else 0.dp
+                            ).let {
+                                PaddingValues(
+                                    top = it.calculateTopPadding(),
+                                    bottom = it.calculateBottomPadding(),
+                                    start = it.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
+                                    end = if (listState.canScrollForward || listState.canScrollBackward) 24.dp else 0.dp
                                 )
                             }
+                        ) {
+                            itemsIndexed(
+                                localReorderableSongs,
+                                key = { _, item -> item.id }) { _, song ->
+                                ReorderableItem(
+                                    state = reorderableState,
+                                    key = song.id,
+                                ) { isDragging ->
+                                    val scale by animateFloatAsState(
+                                        if (isDragging) 1.05f else 1f,
+                                        label = "scale"
+                                    )
+
+                                    QueuePlaylistSongItem(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 0.dp)
+                                            .graphicsLayer {
+                                                scaleX = scale
+                                                scaleY = scale
+                                            },
+                                        onClick = {
+                                            playerViewModel.playSongs(
+                                                localReorderableSongs,
+                                                song,
+                                                currentPlaylist.name,
+                                                currentPlaylist.id
+                                            )
+                                        },
+                                        song = song,
+                                        isCurrentSong = playerStableState.currentSong?.id == song.id,
+                                        isPlaying = playerStableState.isPlaying,
+                                        isDragging = isDragging,
+                                        onRemoveClick = {
+                                            if (!isFolderPlaylist) {
+                                                currentPlaylist.let {
+                                                    playlistViewModel.removeSongFromPlaylist(it.id, song.id)
+                                                }
+                                            }
+                                        },
+                                        isFromPlaylist = true,
+                                        isReorderModeEnabled = isReorderModeEnabled,
+                                        isDragHandleVisible = isReorderModeEnabled,
+                                        isRemoveButtonVisible = isRemoveModeEnabled,
+                                        onMoreOptionsClick = stableOnMoreOptionsClick,
+                                        dragHandle = {
+                                            IconButton(
+                                                onClick = {},
+                                                modifier = Modifier
+                                                    .draggableHandle(
+                                                        onDragStarted = {
+                                                            ViewCompat.performHapticFeedback(
+                                                                view,
+                                                                HapticFeedbackConstantsCompat.GESTURE_START
+                                                            )
+                                                        },
+                                                        onDragStopped = {
+                                                            ViewCompat.performHapticFeedback(
+                                                                view,
+                                                                HapticFeedbackConstantsCompat.GESTURE_END
+                                                            )
+                                                        }
+                                                    )
+                                                    .size(40.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.DragIndicator,
+                                                    contentDescription = "Reorder song",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
+
+                        ExpressiveScrollBar(
+                            listState = listState,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(
+                                    bottom = if (playerStableState.currentSong != null) MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 20.dp else WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp,
+                                    end = 14.dp,
+                                    top = 18.dp // Increased to 16.dp as requested
+                                )
+                        )
                     }
                 }
             }

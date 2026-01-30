@@ -183,6 +183,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import androidx.paging.LoadState
+import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
 
 val ListExtraBottomGap = 30.dp
 val PlayerSheetCollapsedCornerRadius = 32.dp
@@ -1386,57 +1387,72 @@ fun LibraryFoldersTab(
                             )
                         }
                     ) {
-                        LazyColumn(
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .fillMaxSize()
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = 26.dp,
-                                        topEnd = 26.dp,
-                                        bottomStart = PlayerSheetCollapsedCornerRadius,
-                                        bottomEnd = PlayerSheetCollapsedCornerRadius
-                                    )
-                                ),
-                            state = listState,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(
-                                bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap,
-                                top = 0.dp                            )
-                        ) {
-                            if (showPlaylistCards) {
-                                items(itemsToShow, key = { "folder_${it.path}" }) { folder ->
-                                    FolderPlaylistItem(
-                                        folder = folder,
-                                        onClick = { onFolderAsPlaylistClick(folder) }
-                                    )
-                                }
-                            } else {
-                                items(itemsToShow, key = { "folder_${it.path}" }) { folder ->
-                                    FolderListItem(
-                                        folder = folder,
-                                        onClick = { onFolderClick(folder.path) }
-                                    )
-                                }
-                            }
-
-                            items(songsToShow, key = { "song_${it.id}" }) { song ->
-                                EnhancedSongListItem(
-                                    song = song,
-                                    isPlaying = stablePlayerState.currentSong?.id == song.id && stablePlayerState.isPlaying,
-                                    isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                                    onMoreOptionsClick = { onMoreOptionsClick(song) },
-                                    onClick = {
-                                        val songIndex = songsToShow.indexOf(song)
-                                        if (songIndex != -1) {
-                                            val songsToPlay =
-                                                songsToShow.subList(songIndex, songsToShow.size)
-                                                    .toList()
-                                            onPlaySong(song, songsToPlay)
-                                        }
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp)
+                                    .fillMaxSize()
+                                    .clip(
+                                        RoundedCornerShape(
+                                            topStart = 26.dp,
+                                            topEnd = 26.dp,
+                                            bottomStart = PlayerSheetCollapsedCornerRadius,
+                                            bottomEnd = PlayerSheetCollapsedCornerRadius
+                                        )
+                                    ),
+                                state = listState,
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(
+                                    bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap,
+                                    top = 0.dp                            )
+                            ) {
+                                if (showPlaylistCards) {
+                                    items(itemsToShow, key = { "folder_${it.path}" }) { folder ->
+                                        FolderPlaylistItem(
+                                            folder = folder,
+                                            onClick = { onFolderAsPlaylistClick(folder) }
+                                        )
                                     }
-                                )
+                                } else {
+                                    items(itemsToShow, key = { "folder_${it.path}" }) { folder ->
+                                        FolderListItem(
+                                            folder = folder,
+                                            onClick = { onFolderClick(folder.path) }
+                                        )
+                                    }
+                                }
+
+                                items(songsToShow, key = { "song_${it.id}" }) { song ->
+                                    EnhancedSongListItem(
+                                        song = song,
+                                        isPlaying = stablePlayerState.currentSong?.id == song.id && stablePlayerState.isPlaying,
+                                        isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                                        onMoreOptionsClick = { onMoreOptionsClick(song) },
+                                        onClick = {
+                                            val songIndex = songsToShow.indexOf(song)
+                                            if (songIndex != -1) {
+                                                val songsToPlay =
+                                                    songsToShow.subList(songIndex, songsToShow.size)
+                                                        .toList()
+                                                onPlaySong(song, songsToPlay)
+                                            }
+                                        }
+                                    )
+                                }
                             }
+                            
+                            // ScrollBar Overlay
+                            val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong()) 
+                                bottomBarHeight + MiniPlayerHeight + 16.dp 
+                            else 
+                                bottomBarHeight + 16.dp
+
+                            ExpressiveScrollBar(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
+                                listState = listState
+                            )
                         }
                     }
                 }
@@ -1582,39 +1598,54 @@ fun LibraryFavoritesTab(
                     )
                 }
             ) {
-                LazyColumn(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
-                        .clip(
-                            RoundedCornerShape(
-                                topStart = 26.dp,
-                                topEnd = 26.dp,
-                                bottomStart = PlayerSheetCollapsedCornerRadius,
-                                bottomEnd = PlayerSheetCollapsedCornerRadius
-                            )
-                        ),
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
-                ) {
-                    items(favoriteSongs, key = { "fav_${it.id}" }) { song ->
-                        val isPlayingThisSong =
-                            song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
-                        EnhancedSongListItem(
-                            song = song,
-                            isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                            isPlaying = isPlayingThisSong,
-                            onMoreOptionsClick = { onMoreOptionsClick(song) },
-                            onClick = {
-                                playerViewModel.showAndPlaySong(
-                                    song,
-                                    favoriteSongs,
-                                    "Liked Songs"
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 26.dp,
+                                    topEnd = 26.dp,
+                                    bottomStart = PlayerSheetCollapsedCornerRadius,
+                                    bottomEnd = PlayerSheetCollapsedCornerRadius
                                 )
-                            }
-                        )
+                            ),
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
+                    ) {
+                        items(favoriteSongs, key = { "fav_${it.id}" }) { song ->
+                            val isPlayingThisSong =
+                                song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
+                            EnhancedSongListItem(
+                                song = song,
+                                isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                                isPlaying = isPlayingThisSong,
+                                onMoreOptionsClick = { onMoreOptionsClick(song) },
+                                onClick = {
+                                    playerViewModel.showAndPlaySong(
+                                        song,
+                                        favoriteSongs,
+                                        "Liked Songs"
+                                    )
+                                }
+                            )
+                        }
                     }
+                    
+                    // ScrollBar Overlay
+                    val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong()) 
+                        bottomBarHeight + MiniPlayerHeight + 16.dp 
+                    else 
+                        bottomBarHeight + 16.dp
+
+                    com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
+                        listState = listState
+                    )
                 }
             }
         }
@@ -1856,7 +1887,7 @@ fun LibrarySongsTabPaginated(
             // Initial loading - show skeleton placeholders
             LazyColumn(
                 modifier = Modifier
-                    .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
+                    .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
                     .clip(
                         RoundedCornerShape(
                             topStart = 26.dp,
@@ -1928,7 +1959,7 @@ fun LibrarySongsTabPaginated(
             }
         }
         else -> {
-            // Songs loaded - show paginated list
+                // Songs loaded - show paginated list
             Box(modifier = Modifier.fillMaxSize()) {
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
@@ -1946,71 +1977,86 @@ fun LibrarySongsTabPaginated(
                         )
                     }
                 ) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 26.dp,
-                                    topEnd = 26.dp,
-                                    bottomStart = PlayerSheetCollapsedCornerRadius,
-                                    bottomEnd = PlayerSheetCollapsedCornerRadius
-                                )
-                            ),
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
-                    ) {
-                        item(key = "songs_top_spacer") { Spacer(Modifier.height(0.dp)) }
-                        
-                        items(
-                            count = paginatedSongs.itemCount,
-                            key = paginatedSongs.itemKey { "song_${it.id}" },
-                            contentType = paginatedSongs.itemContentType { "song" }
-                        ) { index ->
-                            val song = paginatedSongs[index]
-                            if (song != null) {
-                                val isPlayingThisSong = song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
-                                
-                                val rememberedOnMoreOptionsClick: (Song) -> Unit = remember(onMoreOptionsClick) {
-                                    { songFromListItem -> onMoreOptionsClick(songFromListItem) }
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
+                                .clip(
+                                    RoundedCornerShape(
+                                        topStart = 26.dp,
+                                        topEnd = 26.dp,
+                                        bottomStart = PlayerSheetCollapsedCornerRadius,
+                                        bottomEnd = PlayerSheetCollapsedCornerRadius
+                                    )
+                                ),
+                            state = listState,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
+                        ) {
+                            item(key = "songs_top_spacer") { Spacer(Modifier.height(0.dp)) }
+                            
+                            items(
+                                count = paginatedSongs.itemCount,
+                                key = paginatedSongs.itemKey { "song_${it.id}" },
+                                contentType = paginatedSongs.itemContentType { "song" }
+                            ) { index ->
+                                val song = paginatedSongs[index]
+                                if (song != null) {
+                                    val isPlayingThisSong = song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
+                                    
+                                    val rememberedOnMoreOptionsClick: (Song) -> Unit = remember(onMoreOptionsClick) {
+                                        { songFromListItem -> onMoreOptionsClick(songFromListItem) }
+                                    }
+                                    val rememberedOnClick: () -> Unit = remember(song) {
+                                        { playerViewModel.showAndPlaySong(song) }
+                                    }
+                                    
+                                    EnhancedSongListItem(
+                                        song = song,
+                                        isPlaying = isPlayingThisSong,
+                                        isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                                        isLoading = false,
+                                        onMoreOptionsClick = rememberedOnMoreOptionsClick,
+                                        onClick = rememberedOnClick
+                                    )
+                                } else {
+                                    // Placeholder while loading
+                                    EnhancedSongListItem(
+                                        song = Song.emptySong(),
+                                        isPlaying = false,
+                                        isLoading = true,
+                                        isCurrentSong = false,
+                                        onMoreOptionsClick = {},
+                                        onClick = {}
+                                    )
                                 }
-                                val rememberedOnClick: () -> Unit = remember(song) {
-                                    { playerViewModel.showAndPlaySong(song) }
+                            }
+                            
+                            // Loading indicator for appending more items
+                            if (paginatedSongs.loadState.append is LoadState.Loading) {
+                                item {
+                                    Box(
+                                        Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        LoadingIndicator(modifier = Modifier.size(32.dp))
+                                    }
                                 }
-                                
-                                EnhancedSongListItem(
-                                    song = song,
-                                    isPlaying = isPlayingThisSong,
-                                    isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                                    isLoading = false,
-                                    onMoreOptionsClick = rememberedOnMoreOptionsClick,
-                                    onClick = rememberedOnClick
-                                )
-                            } else {
-                                // Placeholder while loading
-                                EnhancedSongListItem(
-                                    song = Song.emptySong(),
-                                    isPlaying = false,
-                                    isLoading = true,
-                                    isCurrentSong = false,
-                                    onMoreOptionsClick = {},
-                                    onClick = {}
-                                )
                             }
                         }
                         
-                        // Loading indicator for appending more items
-                        if (paginatedSongs.loadState.append is LoadState.Loading) {
-                            item {
-                                Box(
-                                    Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    LoadingIndicator(modifier = Modifier.size(32.dp))
-                                }
-                            }
-                        }
+                        // ScrollBar Overlay
+                        val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong()) 
+                            bottomBarHeight + MiniPlayerHeight + 16.dp 
+                        else 
+                           bottomBarHeight + 16.dp
+
+                        com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
+                            listState = listState
+                        )
                     }
                 }
                 // Top gradient fade effect
@@ -2337,6 +2383,7 @@ fun LibraryAlbumsTab(
             }
         }
     } else {
+        // Songs loaded - show paginated list
         Box(modifier = Modifier.fillMaxSize()) {
             val albumsPullToRefreshState = rememberPullToRefreshState()
             PullToRefreshBox(
@@ -2352,37 +2399,53 @@ fun LibraryAlbumsTab(
                     )
                 }
             ) {
-                LazyVerticalGrid(
-                    modifier = Modifier
-                        .padding(start = 14.dp, end = 14.dp, bottom = 6.dp)
-                        .clip(
-                            RoundedCornerShape(
-                                topStart = 26.dp,
-                                topEnd = 26.dp,
-                                bottomStart = PlayerSheetCollapsedCornerRadius,
-                                bottomEnd = PlayerSheetCollapsedCornerRadius
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        modifier = Modifier
+                            .padding(start = 14.dp, end = if (gridState.canScrollForward || gridState.canScrollBackward) 24.dp else 14.dp, bottom = 6.dp)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 26.dp,
+                                    topEnd = 26.dp,
+                                    bottomStart = PlayerSheetCollapsedCornerRadius,
+                                    bottomEnd = PlayerSheetCollapsedCornerRadius
+                                )
+                            ),
+                        state = gridState,
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        item(key = "albums_top_spacer", span = { GridItemSpan(maxLineSpan) }) {
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        items(albums, key = { "album_${it.id}" }) { album ->
+                            val albumSpecificColorSchemeFlow =
+                                playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(album.albumArtUriString ?: "")
+                            val rememberedOnClick = remember(album.id) { { onAlbumClick(album.id) } }
+                            AlbumGridItemRedesigned(
+                                album = album,
+                                albumColorSchemePairFlow = albumSpecificColorSchemeFlow,
+                                onClick = rememberedOnClick,
+                                isLoading = isLoading && albums.isEmpty() // Shimmer solo si está cargando Y la lista está vacía
                             )
-                        ),
-                    state = gridState,
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    item(key = "albums_top_spacer", span = { GridItemSpan(maxLineSpan) }) {
-                        Spacer(Modifier.height(4.dp))
+                        }
                     }
-                    items(albums, key = { "album_${it.id}" }) { album ->
-                        val albumSpecificColorSchemeFlow =
-                            playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(album.albumArtUriString ?: "")
-                        val rememberedOnClick = remember(album.id) { { onAlbumClick(album.id) } }
-                        AlbumGridItemRedesigned(
-                            album = album,
-                            albumColorSchemePairFlow = albumSpecificColorSchemeFlow,
-                            onClick = rememberedOnClick,
-                            isLoading = isLoading && albums.isEmpty() // Shimmer solo si está cargando Y la lista está vacía
-                        )
-                    }
+                    
+                    // ScrollBar Overlay
+                    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+                    val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong()) 
+                        bottomBarHeight + MiniPlayerHeight + 16.dp 
+                    else 
+                        bottomBarHeight + 16.dp
+                    
+                    com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
+                        gridState = gridState
+                    )
                 }
             }
 //            Box(
@@ -2601,34 +2664,50 @@ fun LibraryArtistsTab(
                     )
                 }
             ) {
-                LazyColumn(
-                    modifier = Modifier
-                        .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
-                        .clip(
-                            RoundedCornerShape(
-                                topStart = 26.dp,
-                                topEnd = 26.dp,
-                                bottomStart = PlayerSheetCollapsedCornerRadius,
-                                bottomEnd = PlayerSheetCollapsedCornerRadius
-                            )
-                        ),
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap)
-                ) {
-                    item(key = "artists_top_spacer") {
-                        Spacer(Modifier.height(4.dp))
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 26.dp,
+                                    topEnd = 26.dp,
+                                    bottomStart = PlayerSheetCollapsedCornerRadius,
+                                    bottomEnd = PlayerSheetCollapsedCornerRadius
+                                )
+                            ),
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap)
+                    ) {
+                        item(key = "artists_top_spacer") {
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        items(artists, key = { "artist_${it.id}" }) { artist ->
+                            val rememberedOnClick = remember(artist) { { onArtistClick(artist.id) } }
+                            ArtistListItem(artist = artist, onClick = rememberedOnClick)
+                        }
+                        // "Load more" indicator removed as all artists are loaded at once
+                        // if (isLoading && artists.isNotEmpty()) {
+                        //     item { Box(Modifier
+                        //         .fillMaxWidth()
+                        //         .padding(16.dp), Alignment.Center) { CircularProgressIndicator() } }
+                        // }
                     }
-                    items(artists, key = { "artist_${it.id}" }) { artist ->
-                        val rememberedOnClick = remember(artist) { { onArtistClick(artist.id) } }
-                        ArtistListItem(artist = artist, onClick = rememberedOnClick)
-                    }
-                    // "Load more" indicator removed as all artists are loaded at once
-                    // if (isLoading && artists.isNotEmpty()) {
-                    //     item { Box(Modifier
-                    //         .fillMaxWidth()
-                    //         .padding(16.dp), Alignment.Center) { CircularProgressIndicator() } }
-                    // }
+                    
+                    // ScrollBar Overlay
+                    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+                    val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong()) 
+                        bottomBarHeight + MiniPlayerHeight + 16.dp 
+                    else 
+                        bottomBarHeight + 16.dp
+
+                    com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
+                        listState = listState
+                    )
                 }
             }
 //            Box(

@@ -219,65 +219,83 @@ fun SongPickerList(
                 .fillMaxSize(), Alignment.Center
         ) { CircularProgressIndicator() }
     } else {
-        LazyColumn(
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        Box(
             modifier = modifier
-                .padding(horizontal = 14.dp),
-            contentPadding = contentPadding,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = 14.dp)
         ) {
-            items(filteredSongs, key = { it.id }) { song ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(CircleShape)
-                        .clickable {
-                            val currentSelection = selectedSongIds[song.id] ?: false
-                            selectedSongIds[song.id] = !currentSelection
-                        }
-                        .background(
-                            color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                            shape = CircleShape
-                        )
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = selectedSongIds[song.id] ?: false,
-                        onCheckedChange = { isChecked ->
-                            selectedSongIds[song.id] = isChecked
-                        }
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    bottom = contentPadding.calculateBottomPadding(),
+                    top = contentPadding.calculateTopPadding(),
+                    start = contentPadding.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
+                    end = if (listState.canScrollForward || listState.canScrollBackward) 12.dp else 0.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredSongs, key = { it.id }) { song ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(CircleShape)
+                            .clickable {
+                                val currentSelection = selectedSongIds[song.id] ?: false
+                                selectedSongIds[song.id] = !currentSelection
+                            }
                             .background(
-                                MaterialTheme.colorScheme.surfaceVariant,
-                                CircleShape
+                                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                shape = CircleShape
                             )
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SmartImage(
-                            model = song.albumArtUriString,
-                            contentDescription = song.title,
-                            shape = albumShape,
-                            targetSize = Size(
-                                168,
-                                168
-                            ), // 56dp * 3 (para densidad xxhdpi)
-                            modifier = Modifier.fillMaxSize()
+                        Checkbox(
+                            checked = selectedSongIds[song.id] ?: false,
+                            onCheckedChange = { isChecked ->
+                                selectedSongIds[song.id] = isChecked
+                            }
                         )
-                    }
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            song.displayArtist,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    CircleShape
+                                )
+                        ) {
+                            SmartImage(
+                                model = song.albumArtUriString,
+                                contentDescription = song.title,
+                                shape = albumShape,
+                                targetSize = Size(
+                                    168,
+                                    168
+                                ), // 56dp * 3 (para densidad xxhdpi)
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column {
+                            Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                song.displayArtist,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
+            
+            com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar(
+                listState = listState,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(bottom = contentPadding.calculateBottomPadding(), top = contentPadding.calculateTopPadding())
+            )
         }
     }
 }

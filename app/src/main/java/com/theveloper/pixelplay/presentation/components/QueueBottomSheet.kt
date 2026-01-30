@@ -558,122 +558,143 @@ fun QueueBottomSheet(
                         Text("Queue is empty.", color = colors.onSurface)
                     }
                 } else {
-                    LazyColumn(
-                        state = listState,
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .clip(
-                                shape = AbsoluteSmoothCornerShape(
-                                    cornerRadiusTR = 26.dp,
-                                    smoothnessAsPercentTR = 60,
-                                    cornerRadiusTL = 26.dp,
-                                    smoothnessAsPercentTL = 60,
-                                    cornerRadiusBR = 0.dp,
-                                    smoothnessAsPercentBR = 60,
-                                    cornerRadiusBL = 0.dp,
-                                    smoothnessAsPercentBL = 60
-                                )
-                            )
-                            .background(
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                shape = AbsoluteSmoothCornerShape(
-                                    cornerRadiusTR = 26.dp,
-                                    smoothnessAsPercentTR = 60,
-                                    cornerRadiusTL = 26.dp,
-                                    smoothnessAsPercentTL = 60,
-                                    cornerRadiusBR = 0.dp,
-                                    smoothnessAsPercentBR = 60,
-                                    cornerRadiusBL = 0.dp,
-                                    smoothnessAsPercentBL = 60
-                                )
-                            )
-                            .then(
-                                if (isReordering || reorderHandleInUse) {
-                                    Modifier
-                                } else {
-                                    Modifier.nestedScroll(listDragConnection)
-                                }
-                            ),
-                        userScrollEnabled = !(isReordering || reorderHandleInUse),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 32.dp)
                     ) {
-                        item("queue_top_spacer") {
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
-
-                        itemsIndexed(items, key = { _, item -> item.uniqueId }) { index, item ->
-                            val song = item.song
-                            // Use currentSongDisplayIndex for comparison since index is in displayQueue
-                            val canReorder = index > currentSongDisplayIndex
-                            ReorderableItem(
-                                state = reorderableState,
-                                key = item.uniqueId,
-                                enabled = canReorder
-                            ) { isDragging ->
-                                val scale by animateFloatAsState(
-                                    targetValue = if (isDragging) 1.05f else 1f,
-                                    label = "scaleAnimation"
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(
+                                    shape = AbsoluteSmoothCornerShape(
+                                        cornerRadiusTR = 26.dp,
+                                        smoothnessAsPercentTR = 60,
+                                        cornerRadiusTL = 26.dp,
+                                        smoothnessAsPercentTL = 60,
+                                        cornerRadiusBR = 0.dp,
+                                        smoothnessAsPercentBR = 60,
+                                        cornerRadiusBL = 0.dp,
+                                        smoothnessAsPercentBL = 60
+                                    )
                                 )
+                                .background(
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    shape = AbsoluteSmoothCornerShape(
+                                        cornerRadiusTR = 26.dp,
+                                        smoothnessAsPercentTR = 60,
+                                        cornerRadiusTL = 26.dp,
+                                        smoothnessAsPercentTL = 60,
+                                        cornerRadiusBR = 0.dp,
+                                        smoothnessAsPercentBR = 60,
+                                        cornerRadiusBL = 0.dp,
+                                        smoothnessAsPercentBL = 60
+                                    )
+                                )
+                                .then(
+                                    if (isReordering || reorderHandleInUse) {
+                                        Modifier
+                                    } else {
+                                        Modifier.nestedScroll(listDragConnection)
+                                    }
+                                ),
+                            userScrollEnabled = !(isReordering || reorderHandleInUse),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(
+                                start = 0.dp, // Reduced start padding by half (12dp -> 6dp)
+                                // Reduced end padding: 16.dp when scrollable (was 22.dp), 6dp otherwise to match start
+                                end = if (listState.canScrollForward || listState.canScrollBackward) 26.dp else 0.dp,
+                                bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 32.dp
+                            )
+                        ) {
+                            item("queue_top_spacer") {
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
 
-                                QueuePlaylistSongItem(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 0.dp)
-                                        .graphicsLayer {
-                                            scaleX = scale
-                                            scaleY = scale
-                                        }
-                                    ,
-                                    onClick = { onPlaySong(song) },
-                                    song = song,
-                                    // Use index comparison to correctly highlight only the current song
-                                    // even when the same song appears multiple times in the queue
-                                    isCurrentSong = index == currentSongDisplayIndex,
-                                    isPlaying = isPlaying,
-                                    isDragging = isDragging,
-                                    onRemoveClick = { onRemoveSong(song.id) },
-                                    isReorderModeEnabled = false,
-                                    isDragHandleVisible = canReorder,
-                                    isRemoveButtonVisible = false,
-                                    enableSwipeToDismiss = canReorder,
-                                    onDismiss = { onRemoveSong(song.id) },
-                                    isFromPlaylist = true,
-                                    onMoreOptionsClick = { onSongInfoClick(song) },
-                                    dragHandle = {
-                                        IconButton(
-                                            onClick = {},
-                                            modifier = Modifier
-                                                .draggableHandle(
-                                                        onDragStarted = {
-                                                            draggingSheetFromList = false
-                                                            reorderHandleInUse = true
+                            itemsIndexed(items, key = { _, item -> item.uniqueId }) { index, item ->
+                                val song = item.song
+                                // Use currentSongDisplayIndex for comparison since index is in displayQueue
+                                val canReorder = index > currentSongDisplayIndex
+                                ReorderableItem(
+                                    state = reorderableState,
+                                    key = item.uniqueId,
+                                    enabled = canReorder
+                                ) { isDragging ->
+                                    val scale by animateFloatAsState(
+                                        targetValue = if (isDragging) 1.05f else 1f,
+                                        label = "scaleAnimation"
+                                    )
+
+                                    QueuePlaylistSongItem(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 0.dp)
+                                            .graphicsLayer {
+                                                scaleX = scale
+                                                scaleY = scale
+                                            }
+                                        ,
+                                        onClick = { onPlaySong(song) },
+                                        song = song,
+                                        // Use index comparison to correctly highlight only the current song
+                                        // even when the same song appears multiple times in the queue
+                                        isCurrentSong = index == currentSongDisplayIndex,
+                                        isPlaying = isPlaying,
+                                        isDragging = isDragging,
+                                        onRemoveClick = { onRemoveSong(song.id) },
+                                        isReorderModeEnabled = false,
+                                        isDragHandleVisible = canReorder,
+                                        isRemoveButtonVisible = false,
+                                        enableSwipeToDismiss = canReorder,
+                                        onDismiss = { onRemoveSong(song.id) },
+                                        isFromPlaylist = true,
+                                        onMoreOptionsClick = { onSongInfoClick(song) },
+                                        dragHandle = {
+                                            IconButton(
+                                                onClick = {},
+                                                modifier = Modifier
+                                                    .draggableHandle(
+                                                            onDragStarted = {
+                                                                draggingSheetFromList = false
+                                                                reorderHandleInUse = true
+                                                                ViewCompat.performHapticFeedback(
+                                                                    view,
+                                                                HapticFeedbackConstantsCompat.GESTURE_START
+                                                            )
+                                                        },
+                                                        onDragStopped = {
+                                                            reorderHandleInUse = false
                                                             ViewCompat.performHapticFeedback(
                                                                 view,
-                                                            HapticFeedbackConstantsCompat.GESTURE_START
-                                                        )
-                                                    },
-                                                    onDragStopped = {
-                                                        reorderHandleInUse = false
-                                                        ViewCompat.performHapticFeedback(
-                                                            view,
-                                                            HapticFeedbackConstantsCompat.GESTURE_END
-                                                        )
-                                                    }
+                                                                HapticFeedbackConstantsCompat.GESTURE_END
+                                                            )
+                                                        }
+                                                    )
+                                                    .size(40.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.DragIndicator,
+                                                    contentDescription = "Reorder song",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
-                                                .size(40.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.DragIndicator,
-                                                contentDescription = "Reorder song",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            }
                                         }
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
+
+                        ExpressiveScrollBar(
+                            listState = listState,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(
+                                    top = 24.dp,
+                                    end = 14.dp,
+                                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 14.dp
+                                )
+                        )
                     }
                 }
             }
