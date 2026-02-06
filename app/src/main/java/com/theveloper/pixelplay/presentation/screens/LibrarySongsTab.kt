@@ -26,7 +26,13 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,13 +42,34 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
+import com.theveloper.pixelplay.presentation.components.subcomps.EnhancedSongListItem
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
+/**
+ * Songs tab for the library screen with multi-selection support.
+ *
+ * @param songs The list of songs to display
+ * @param isLoading Whether the songs are currently loading
+ * @param stablePlayerState Current player state for highlighting playing song
+ * @param playerViewModel ViewModel for playback actions
+ * @param bottomBarHeight Height of the bottom bar for padding
+ * @param onMoreOptionsClick Callback when more options is clicked on a song
+ * @param isRefreshing Whether pull-to-refresh is active
+ * @param onRefresh Callback for pull-to-refresh
+ * @param isSelectionMode Whether multi-selection mode is active
+ * @param selectedSongIds Set of currently selected song IDs
+ * @param onSongLongPress Callback when a song is long-pressed (activates selection)
+ * @param onSongSelectionToggle Callback to toggle selection of a song
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LibrarySongsTab(
@@ -53,10 +80,66 @@ fun LibrarySongsTab(
     bottomBarHeight: Dp,
     onMoreOptionsClick: (Song) -> Unit,
     isRefreshing: Boolean,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    // Multi-selection parameters
+    isSelectionMode: Boolean = false,
+    selectedSongIds: Set<String> = emptySet(),
+    onSongLongPress: (Song) -> Unit = {},
+    onSongSelectionToggle: (Song) -> Unit = {},
+    onLocateCurrentSongVisibilityChanged: (Boolean) -> Unit = {},
+    onRegisterLocateCurrentSongAction: ((() -> Unit)?) -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     val pullToRefreshState = rememberPullToRefreshState()
+    val coroutineScope = rememberCoroutineScope()
+    val visibilityCallback by rememberUpdatedState(onLocateCurrentSongVisibilityChanged)
+    val registerActionCallback by rememberUpdatedState(onRegisterLocateCurrentSongAction)
+    val currentSongId = stablePlayerState.currentSong?.id
+    val currentSongListIndex = remember(songs, currentSongId) {
+        currentSongId?.let { songId -> songs.indexOfFirst { it.id == songId } } ?: -1
+    }
+    val locateCurrentSongAction: (() -> Unit)? = remember(currentSongListIndex, listState) {
+        if (currentSongListIndex < 0) {
+            null
+        } else {
+            {
+                coroutineScope.launch {
+                    listState.animateScrollToItem(currentSongListIndex)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(locateCurrentSongAction) {
+        registerActionCallback(locateCurrentSongAction)
+    }
+
+    LaunchedEffect(currentSongListIndex, songs, isLoading, listState) {
+        if (currentSongListIndex < 0 || songs.isEmpty() || isLoading) {
+            visibilityCallback(false)
+            return@LaunchedEffect
+        }
+
+        snapshotFlow {
+            val visibleItems = listState.layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) {
+                false
+            } else {
+                currentSongListIndex in visibleItems.first().index..visibleItems.last().index
+            }
+        }
+            .distinctUntilChanged()
+            .collect { isVisible ->
+                visibilityCallback(!isVisible)
+            }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            visibilityCallback(false)
+            registerActionCallback(null)
+        }
+    }
 
     // Handle different loading states
     when {
@@ -64,7 +147,7 @@ fun LibrarySongsTab(
             // Initial loading - show skeleton placeholders
             LazyColumn(
                 modifier = Modifier
-                    .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
+                    .padding(start = 12.dp, end = 24.dp, bottom = 6.dp)
                     .clip(
                         RoundedCornerShape(
                             topStart = 26.dp,
@@ -130,68 +213,90 @@ fun LibrarySongsTab(
                         )
                     }
                 ) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 26.dp,
-                                    topEnd = 26.dp,
-                                    bottomStart = PlayerSheetCollapsedCornerRadius,
-                                    bottomEnd = PlayerSheetCollapsedCornerRadius
-                                )
-                            ),
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
-                    ) {
-                        item(key = "songs_top_spacer") { Spacer(Modifier.height(0.dp)) }
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
+                                .clip(
+                                    RoundedCornerShape(
+                                        topStart = 26.dp,
+                                        topEnd = 26.dp,
+                                        bottomStart = PlayerSheetCollapsedCornerRadius,
+                                        bottomEnd = PlayerSheetCollapsedCornerRadius
+                                    )
+                                ),
+                            state = listState,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
+                        ) {
+                            //item(key = "songs_top_spacer") { Spacer(Modifier.height(0.dp)) }
 
-                        items(
-                            items = songs,
-                            key = { "song_${it.id}" },
-                            contentType = { "song" }
-                        ) { song ->
-                            val isPlayingThisSong = song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
-                            
-                            val rememberedOnMoreOptionsClick: (Song) -> Unit = remember(onMoreOptionsClick) {
-                                { songFromListItem -> onMoreOptionsClick(songFromListItem) }
-                            }
-                            val rememberedOnClick: () -> Unit = remember(song) {
-                                { 
-                                  // Play using showAndPlaySong but passing the SORTED list as queue
-                                  // Important: We should pass 'songs' as the queue context
-                                  // But showAndPlaySong might expect paginated logic in VM?
-                                  // PlayerViewModel logic: showAndPlaySong(song, queue, name).
-                                  // Usually calls playSongs(queue, song). If we pass 'songs', it plays in sorted order!
-                                  playerViewModel.showAndPlaySong(song, songs, "Library") 
+                            items(
+                                items = songs,
+                                key = { "song_${it.id}" },
+                                contentType = { "song" }
+                            ) { song ->
+                                val isPlayingThisSong = song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
+                                val isSelected = selectedSongIds.contains(song.id)
+                                
+                                val rememberedOnMoreOptionsClick: (Song) -> Unit = remember(onMoreOptionsClick) {
+                                    { songFromListItem -> onMoreOptionsClick(songFromListItem) }
                                 }
-                            }
+                                
+                                // In selection mode, click toggles selection instead of playing
+                                val rememberedOnClick: () -> Unit = remember(song, isSelectionMode) {
+                                    if (isSelectionMode) {
+                                        { onSongSelectionToggle(song) }
+                                    } else {
+                                        { playerViewModel.showAndPlaySong(song, songs, "Library") }
+                                    }
+                                }
+                                
+                                val rememberedOnLongPress: () -> Unit = remember(song) {
+                                    { onSongLongPress(song) }
+                                }
 
-                            EnhancedSongListItem(
-                                song = song,
-                                isPlaying = isPlayingThisSong,
-                                isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                                isLoading = false,
-                                onMoreOptionsClick = rememberedOnMoreOptionsClick,
-                                onClick = rememberedOnClick
-                            )
+                                EnhancedSongListItem(
+                                    song = song,
+                                    isPlaying = isPlayingThisSong,
+                                    isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                                    isLoading = false,
+                                    isSelected = isSelected,
+                                    isSelectionMode = isSelectionMode,
+                                    onLongPress = rememberedOnLongPress,
+                                    onMoreOptionsClick = rememberedOnMoreOptionsClick,
+                                    onClick = rememberedOnClick
+                                )
+                            }
                         }
+                        
+                        // ScrollBar Overlay
+                        val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong()) 
+                            bottomBarHeight + MiniPlayerHeight + 16.dp 
+                        else 
+                            bottomBarHeight + 16.dp
+
+                        com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
+                            listState = listState
+                        )
                     }
                 }
                 // Top gradient fade effect
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(10.dp)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.surface, Color.Transparent
-                                )
-                            )
-                        )
-                )
+//                Box(
+//                    modifier = Modifier
+//                        .fillMaxWidth()
+//                        .height(10.dp)
+//                        .background(
+//                            brush = Brush.verticalGradient(
+//                                colors = listOf(
+//                                    MaterialTheme.colorScheme.surface, Color.Transparent
+//                                )
+//                            )
+//                        )
+//                )
             }
         }
     }

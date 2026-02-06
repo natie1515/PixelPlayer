@@ -1,14 +1,18 @@
 package com.theveloper.pixelplay.presentation.viewmodel
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.theveloper.pixelplay.data.backup.AppDataBackupManager
+import com.theveloper.pixelplay.data.backup.BackupSection
 import com.theveloper.pixelplay.data.preferences.AppThemeMode
 import com.theveloper.pixelplay.data.preferences.CarouselStyle
 import com.theveloper.pixelplay.data.preferences.LibraryNavigationMode
 import com.theveloper.pixelplay.data.preferences.ThemePreference
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.preferences.AlbumArtQuality
+import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
 import com.theveloper.pixelplay.data.preferences.FullPlayerLoadingTweaks
 import com.theveloper.pixelplay.data.repository.LyricsRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
@@ -33,6 +37,7 @@ data class SettingsUiState(
     val isLoadingDirectories: Boolean = false,
     val appThemeMode: String = AppThemeMode.FOLLOW_SYSTEM,
     val playerThemePreference: String = ThemePreference.ALBUM_ART,
+    val albumArtPaletteStyle: AlbumArtPaletteStyle = AlbumArtPaletteStyle.default,
     val mockGenresEnabled: Boolean = false,
     val navBarCornerRadius: Int = 32,
     val navBarStyle: String = NavBarStyle.DEFAULT,
@@ -45,6 +50,7 @@ data class SettingsUiState(
     val isCrossfadeEnabled: Boolean = true,
     val crossfadeDuration: Int = 6000,
     val persistentShuffleEnabled: Boolean = false,
+    val folderBackGestureNavigation: Boolean = false,
     val lyricsSourcePreference: LyricsSourcePreference = LyricsSourcePreference.EMBEDDED_FIRST,
     val autoScanLrcFiles: Boolean = false,
     val blockedDirectories: Set<String> = emptySet(),
@@ -56,8 +62,10 @@ data class SettingsUiState(
     // Developer Options
     val albumArtQuality: AlbumArtQuality = AlbumArtQuality.MEDIUM,
     val tapBackgroundClosesPlayer: Boolean = true,
+    val hapticsEnabled: Boolean = true,
     val immersiveLyricsEnabled: Boolean = false,
-    val immersiveLyricsTimeout: Long = 4000L
+    val immersiveLyricsTimeout: Long = 4000L,
+    val isDataTransferInProgress: Boolean = false
 )
 
 data class FailedSongInfo(
@@ -86,6 +94,7 @@ private sealed interface SettingsUiUpdate {
         val appRebrandDialogShown: Boolean,
         val appThemeMode: String,
         val playerThemePreference: String,
+        val albumArtPaletteStyle: AlbumArtPaletteStyle,
         val mockGenresEnabled: Boolean,
         val navBarCornerRadius: Int,
         val navBarStyle: String,
@@ -101,9 +110,11 @@ private sealed interface SettingsUiUpdate {
         val isCrossfadeEnabled: Boolean,
         val crossfadeDuration: Int,
         val persistentShuffleEnabled: Boolean,
+        val folderBackGestureNavigation: Boolean,
         val lyricsSourcePreference: LyricsSourcePreference,
         val autoScanLrcFiles: Boolean,
         val blockedDirectories: Set<String>,
+        val hapticsEnabled: Boolean,
         val immersiveLyricsEnabled: Boolean,
         val immersiveLyricsTimeout: Long
     ) : SettingsUiUpdate
@@ -116,6 +127,7 @@ class SettingsViewModel @Inject constructor(
     private val geminiModelService: GeminiModelService,
     private val lyricsRepository: LyricsRepository,
     private val musicRepository: MusicRepository,
+    private val appDataBackupManager: AppDataBackupManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -156,6 +168,9 @@ class SettingsViewModel @Inject constructor(
             initialValue = SyncProgress()
         )
 
+    private val _dataTransferEvents = MutableSharedFlow<String>()
+    val dataTransferEvents: SharedFlow<String> = _dataTransferEvents.asSharedFlow()
+
     init {
         // Consolidated collectors using combine() to reduce coroutine overhead
         // Instead of 20 separate coroutines, we use 2 combined flows
@@ -166,6 +181,7 @@ class SettingsViewModel @Inject constructor(
                 userPreferencesRepository.appRebrandDialogShownFlow,
                 userPreferencesRepository.appThemeModeFlow,
                 userPreferencesRepository.playerThemePreferenceFlow,
+                userPreferencesRepository.albumArtPaletteStyleFlow,
                 userPreferencesRepository.mockGenresEnabledFlow,
                 userPreferencesRepository.navBarCornerRadiusFlow,
                 userPreferencesRepository.navBarStyleFlow,
@@ -177,12 +193,13 @@ class SettingsViewModel @Inject constructor(
                     appRebrandDialogShown = values[0] as Boolean,
                     appThemeMode = values[1] as String,
                     playerThemePreference = values[2] as String,
-                    mockGenresEnabled = values[3] as Boolean,
-                    navBarCornerRadius = values[4] as Int,
-                    navBarStyle = values[5] as String,
-                    libraryNavigationMode = values[6] as String,
-                    carouselStyle = values[7] as String,
-                    launchTab = values[8] as String
+                    albumArtPaletteStyle = values[3] as AlbumArtPaletteStyle,
+                    mockGenresEnabled = values[4] as Boolean,
+                    navBarCornerRadius = values[5] as Int,
+                    navBarStyle = values[6] as String,
+                    libraryNavigationMode = values[7] as String,
+                    carouselStyle = values[8] as String,
+                    launchTab = values[9] as String
                 )
             }.collect { update ->
                 _uiState.update { state ->
@@ -190,6 +207,7 @@ class SettingsViewModel @Inject constructor(
                         appRebrandDialogShown = update.appRebrandDialogShown,
                         appThemeMode = update.appThemeMode,
                         playerThemePreference = update.playerThemePreference,
+                        albumArtPaletteStyle = update.albumArtPaletteStyle,
                         mockGenresEnabled = update.mockGenresEnabled,
                         navBarCornerRadius = update.navBarCornerRadius,
                         navBarStyle = update.navBarStyle,
@@ -210,9 +228,11 @@ class SettingsViewModel @Inject constructor(
                 userPreferencesRepository.isCrossfadeEnabledFlow,
                 userPreferencesRepository.crossfadeDurationFlow,
                 userPreferencesRepository.persistentShuffleEnabledFlow,
+                userPreferencesRepository.folderBackGestureNavigationFlow,
                 userPreferencesRepository.lyricsSourcePreferenceFlow,
                 userPreferencesRepository.autoScanLrcFilesFlow,
                 userPreferencesRepository.blockedDirectoriesFlow,
+                userPreferencesRepository.hapticsEnabledFlow,
                 userPreferencesRepository.immersiveLyricsEnabledFlow,
                 userPreferencesRepository.immersiveLyricsTimeoutFlow
             ) { values ->
@@ -223,11 +243,13 @@ class SettingsViewModel @Inject constructor(
                     isCrossfadeEnabled = values[3] as Boolean,
                     crossfadeDuration = values[4] as Int,
                     persistentShuffleEnabled = values[5] as Boolean,
-                    lyricsSourcePreference = values[6] as LyricsSourcePreference,
-                    autoScanLrcFiles = values[7] as Boolean,
-                    blockedDirectories = @Suppress("UNCHECKED_CAST") (values[8] as Set<String>),
-                    immersiveLyricsEnabled = values[9] as Boolean,
-                    immersiveLyricsTimeout = values[10] as Long
+                    folderBackGestureNavigation = values[6] as Boolean,
+                    lyricsSourcePreference = values[7] as LyricsSourcePreference,
+                    autoScanLrcFiles = values[8] as Boolean,
+                    blockedDirectories = @Suppress("UNCHECKED_CAST") (values[9] as Set<String>),
+                    hapticsEnabled = values[10] as Boolean,
+                    immersiveLyricsEnabled = values[11] as Boolean,
+                    immersiveLyricsTimeout = values[12] as Long
                 )
             }.collect { update ->
                 _uiState.update { state ->
@@ -238,9 +260,11 @@ class SettingsViewModel @Inject constructor(
                         isCrossfadeEnabled = update.isCrossfadeEnabled,
                         crossfadeDuration = update.crossfadeDuration,
                         persistentShuffleEnabled = update.persistentShuffleEnabled,
+                        folderBackGestureNavigation = update.folderBackGestureNavigation,
                         lyricsSourcePreference = update.lyricsSourcePreference,
                         autoScanLrcFiles = update.autoScanLrcFiles,
                         blockedDirectories = update.blockedDirectories,
+                        hapticsEnabled = update.hapticsEnabled,
                         immersiveLyricsEnabled = update.immersiveLyricsEnabled,
                         immersiveLyricsTimeout = update.immersiveLyricsTimeout
                     )
@@ -324,6 +348,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setAlbumArtPaletteStyle(style: AlbumArtPaletteStyle) {
+        viewModelScope.launch {
+            userPreferencesRepository.setAlbumArtPaletteStyle(style)
+        }
+    }
+
     fun setAppThemeMode(mode: String) {
         viewModelScope.launch {
             userPreferencesRepository.setAppThemeMode(mode)
@@ -387,6 +417,12 @@ class SettingsViewModel @Inject constructor(
     fun setPersistentShuffleEnabled(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setPersistentShuffleEnabled(enabled)
+        }
+    }
+
+    fun setFolderBackGestureNavigation(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setFolderBackGestureNavigation(enabled)
         }
     }
 
@@ -614,6 +650,41 @@ class SettingsViewModel @Inject constructor(
     fun setTapBackgroundClosesPlayer(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setTapBackgroundClosesPlayer(enabled)
+        }
+    }
+
+    fun setHapticsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setHapticsEnabled(enabled)
+        }
+    }
+
+    fun exportAppData(uri: Uri, sections: Set<BackupSection>) {
+        if (sections.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDataTransferInProgress = true) }
+            val result = appDataBackupManager.exportToUri(uri, sections)
+            _uiState.update { it.copy(isDataTransferInProgress = false) }
+            result.fold(
+                onSuccess = { _dataTransferEvents.emit("Data exported successfully") },
+                onFailure = { _dataTransferEvents.emit("Export failed: ${it.localizedMessage ?: "Unknown error"}") }
+            )
+        }
+    }
+
+    fun importAppData(uri: Uri, sections: Set<BackupSection>) {
+        if (sections.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDataTransferInProgress = true) }
+            val result = appDataBackupManager.importFromUri(uri, sections)
+            _uiState.update { it.copy(isDataTransferInProgress = false) }
+            result.fold(
+                onSuccess = {
+                    _dataTransferEvents.emit("Data imported successfully")
+                    syncManager.sync()
+                },
+                onFailure = { _dataTransferEvents.emit("Import failed: ${it.localizedMessage ?: "Unknown error"}") }
+            )
         }
     }
 }

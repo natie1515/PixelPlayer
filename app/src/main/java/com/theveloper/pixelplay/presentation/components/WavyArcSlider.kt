@@ -2,10 +2,8 @@ package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -86,82 +84,67 @@ fun WavyArcSlider(
         val arcDiameter = minDim - thumbSizePx * 2 - waveAmplitudePx * 2
         val arcRadius = arcDiameter / 2
         val arcCenter = Offset(width / 2, height / 2)
+
+        fun mapTouchToValue(touchPoint: Offset): Float {
+            val dx = touchPoint.x - arcCenter.x
+            val dy = touchPoint.y - arcCenter.y
+            var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+            if (angle < 0f) angle += 360f
+
+            var relativeAngle = angle - startAngle
+            if (relativeAngle < 0f) relativeAngle += 360f
+
+            if (relativeAngle > sweepAngle) {
+                val halfDeadZone = (360f - sweepAngle).coerceAtLeast(0f) / 2f
+                relativeAngle = if (relativeAngle < sweepAngle + halfDeadZone) sweepAngle else 0f
+            }
+
+            val progress = if (sweepAngle == 0f) 0f else (relativeAngle / sweepAngle).coerceIn(0f, 1f)
+            return valueRange.start + progress * (valueRange.endInclusive - valueRange.start)
+        }
         
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(enabled, view) {
+                .pointerInput(enabled, view, valueRange.start, valueRange.endInclusive, startAngle, sweepAngle, arcCenter) {
                     if (!enabled) return@pointerInput
                     awaitEachGesture {
-                        // Wait for the first down event, consuming it if needed, or just observing
-                        // We set requireUnconsumed = false to ensure we see it even if another modifier sees it
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        
-                        // Request interception immediately
-                        view.parent.requestDisallowInterceptTouchEvent(true)
-                        
-                        // Wait for the gesture to finish (up or cancel)
-                        waitForUpOrCancellation()
-                        
-                        // Allow interception again
-                        view.parent.requestDisallowInterceptTouchEvent(false)
-                    }
-                }
-                .pointerInput(enabled, valueRange) {
-                    if (!enabled) return@pointerInput
-                    detectDragGestures(
-                        onDragStart = { 
-                            isInteracting = true 
-                        },
-                        onDragEnd = { 
-                            isInteracting = false 
-                        },
-                        onDragCancel = { 
-                            isInteracting = false 
-                        },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            
-                            // Calculate angle from center to touch point
-                            val touchPoint = change.position
-                            val dx = touchPoint.x - arcCenter.x
-                            val dy = touchPoint.y - arcCenter.y
-                            var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-                            
-                            // Normalize angle to 0..360
-                            if (angle < 0) angle += 360f
-                            
-                            // Map angle to progress relative to startAngle
-                            // StartAngle is usually 135 (bottom-left)
-                            // We need to handle the wrap-around at 360/0 if necessary
-                            // but for 135 start + 270 sweep, the range is 135 -> 405 (45)
-                            
-                            var relativeAngle = angle - startAngle
-                            if (relativeAngle < 0) relativeAngle += 360f
-                            
-                            // If touch is in the "dead zone" (gap between end and start), clamp to nearest
-                            if (relativeAngle > sweepAngle) {
-                                // Clamp to 0 or 1 based on which side is closer
-                                val halfDeadZone = (360f - sweepAngle) / 2
-                                if (relativeAngle < sweepAngle + halfDeadZone) {
-                                    relativeAngle = sweepAngle // effectively 100%
-                                } else {
-                                    relativeAngle = 0f // effectively 0%
-                                }
-                            }
-                            
-                            val newProgress = (relativeAngle / sweepAngle).coerceIn(0f, 1f)
-                            val newValue = valueRange.start + newProgress * (valueRange.endInclusive - valueRange.start)
+                        view.parent?.requestDisallowInterceptTouchEvent(true)
+                        isInteracting = true
+                        down.consume()
+
+                        fun dispatchValue(point: Offset, forceHaptic: Boolean = false) {
+                            val newValue = mapTouchToValue(point)
                             onValueChange(newValue)
-                            
-                            // Haptics
                             val newInt = newValue.roundToInt()
-                            if (newInt != lastHapticValue) {
+                            if (forceHaptic || newInt != lastHapticValue) {
                                 hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 lastHapticValue = newInt
                             }
                         }
-                    )
+
+                        dispatchValue(down.position, forceHaptic = true)
+
+                        var activePointerId = down.id
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pointerChange = event.changes.firstOrNull { it.id == activePointerId }
+                                ?: event.changes.firstOrNull { it.pressed }?.also { activePointerId = it.id }
+                                ?: break
+
+                            if (!pointerChange.pressed) {
+                                pointerChange.consume()
+                                break
+                            }
+
+                            pointerChange.consume()
+                            dispatchValue(pointerChange.position)
+                        }
+
+                        isInteracting = false
+                        view.parent?.requestDisallowInterceptTouchEvent(false)
+                    }
                 }
         ) {
             val activeSweep = sweepAngle * normalizedValue

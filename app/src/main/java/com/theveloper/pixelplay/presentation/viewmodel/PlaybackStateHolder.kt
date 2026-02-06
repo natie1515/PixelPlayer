@@ -2,7 +2,7 @@ package com.theveloper.pixelplay.presentation.viewmodel
 
 import androidx.media3.session.MediaController
 import androidx.media3.common.Player
-import androidx.media3.common.MediaMetadata
+import androidx.media3.common.C
 import com.theveloper.pixelplay.data.service.player.DualPlayerEngine
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import javax.inject.Inject
@@ -15,14 +15,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.data.service.MusicNotificationProvider
 import com.google.android.gms.cast.MediaStatus
-import android.os.Bundle
 import timber.log.Timber
 import com.theveloper.pixelplay.utils.QueueUtils
 import com.theveloper.pixelplay.utils.MediaItemBuilder
 import kotlinx.collections.immutable.toImmutableList
+import kotlin.math.abs
 
 @Singleton
 class PlaybackStateHolder @Inject constructor(
@@ -32,6 +32,11 @@ class PlaybackStateHolder @Inject constructor(
     private val queueStateHolder: QueueStateHolder,
     private val listeningStatsTracker: ListeningStatsTracker
 ) {
+    companion object {
+        private const val TAG = "PlaybackStateHolder"
+        private const val DURATION_MISMATCH_TOLERANCE_MS = 1500L
+    }
+
     private var scope: CoroutineScope? = null
     
     // MediaController
@@ -44,6 +49,7 @@ class PlaybackStateHolder @Inject constructor(
 
     // Internal State
     private var isSeeking = false
+    private var remoteSeekUnlockJob: Job? = null
 
     fun initialize(coroutineScope: CoroutineScope) {
         this.scope = coroutineScope
@@ -68,9 +74,11 @@ class PlaybackStateHolder @Inject constructor(
         if (castSession != null && remoteMediaClient != null) {
             if (remoteMediaClient.isPlaying) {
                 castStateHolder.castPlayer?.pause()
+                _stablePlayerState.update { it.copy(isPlaying = false) }
             } else {
                 if (remoteMediaClient.mediaQueue != null && remoteMediaClient.mediaQueue.itemCount > 0) {
                     castStateHolder.castPlayer?.play()
+                    _stablePlayerState.update { it.copy(isPlaying = true) }
                 } else {
                     Timber.w("Remote queue empty, cannot resume.")
                 }
@@ -88,10 +96,22 @@ class PlaybackStateHolder @Inject constructor(
     fun seekTo(position: Long) {
         val castSession = castStateHolder.castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {
+            val targetPosition = position.coerceAtLeast(0L)
             castStateHolder.setRemotelySeeking(true)
-            castStateHolder.setRemotePosition(position)
-            castStateHolder.castPlayer?.seek(position)
+            castStateHolder.setRemotePosition(targetPosition)
+            _stablePlayerState.update { it.copy(currentPosition = targetPosition) }
+            castStateHolder.castPlayer?.seek(targetPosition)
+
+            remoteSeekUnlockJob?.cancel()
+            remoteSeekUnlockJob = scope?.launch {
+                // Fail-safe: never keep remote seeking lock indefinitely.
+                delay(1800)
+                castStateHolder.setRemotelySeeking(false)
+                castSession.remoteMediaClient?.requestStatus()
+            }
         } else {
+            remoteSeekUnlockJob?.cancel()
+            castStateHolder.setRemotelySeeking(false)
             mediaController?.seekTo(position)
             _stablePlayerState.update { it.copy(currentPosition = position) }
         }
@@ -182,6 +202,59 @@ class PlaybackStateHolder @Inject constructor(
     
     private var progressJob: kotlinx.coroutines.Job? = null
 
+    /**
+     * Reconciles duration reported by the player with the current song metadata duration.
+     *
+     * Why:
+     * - During some transitions (notably crossfade player swaps), the reported duration can lag
+     *   behind the currently visible track for a short period.
+     * - Relying only on one source can make progress run too slow/fast.
+     */
+    private fun resolveEffectiveDuration(
+        reportedDurationMs: Long,
+        songDurationHintMs: Long,
+        currentPositionMs: Long
+    ): Long {
+        val reported = when {
+            reportedDurationMs == C.TIME_UNSET -> 0L
+            reportedDurationMs < 0L -> 0L
+            else -> reportedDurationMs
+        }
+        val hint = songDurationHintMs.coerceAtLeast(0L)
+        val position = currentPositionMs.coerceAtLeast(0L)
+
+        if (reported <= 0L) return hint
+        if (hint <= 0L) return reported
+
+        val diff = abs(reported - hint)
+        if (diff <= DURATION_MISMATCH_TOLERANCE_MS) return reported
+
+        // If playback already passed the metadata hint, trust the reported duration to avoid clipping.
+        if (position > hint + DURATION_MISMATCH_TOLERANCE_MS && reported >= position) {
+            return reported
+        }
+
+        // Otherwise prefer the shorter duration to avoid stale longer values after swaps.
+        val resolved = minOf(reported, hint)
+        if (diff > 10_000L) {
+            Timber.tag(TAG).w(
+                "Duration mismatch resolved (reported=%dms, hint=%dms, pos=%dms, resolved=%dms)",
+                reported, hint, position, resolved
+            )
+        }
+        return resolved
+    }
+
+    fun resolveDurationForPlaybackState(
+        reportedDurationMs: Long,
+        songDurationHintMs: Long,
+        currentPositionMs: Long
+    ): Long = resolveEffectiveDuration(
+        reportedDurationMs = reportedDurationMs,
+        songDurationHintMs = songDurationHintMs,
+        currentPositionMs = currentPositionMs
+    )
+
     fun startProgressUpdates() {
         stopProgressUpdates()
         progressJob = scope?.launch {
@@ -191,19 +264,57 @@ class PlaybackStateHolder @Inject constructor(
                 
                 if (isRemote) {
                     val remoteClient = castSession?.remoteMediaClient
-                    if (remoteClient != null && remoteClient.isPlaying) {
-                        val currentPosition = remoteClient.approximateStreamPosition
-                        val duration = remoteClient.streamDuration
+                    if (remoteClient != null) {
+                        val isRemotePlaying = remoteClient.isPlaying
+                        val currentPosition = remoteClient.approximateStreamPosition.coerceAtLeast(0L)
+                        val songDurationHint = _stablePlayerState.value.currentSong?.duration ?: 0L
+                        val duration = resolveEffectiveDuration(
+                            reportedDurationMs = remoteClient.streamDuration,
+                            songDurationHintMs = songDurationHint,
+                            currentPositionMs = currentPosition
+                        )
+                        val isRemotelySeeking = castStateHolder.isRemotelySeeking.value
+                        if (!isRemotelySeeking) {
+                            castStateHolder.setRemotePosition(currentPosition)
+                        }
+
+                        listeningStatsTracker.onProgress(currentPosition, isRemotePlaying)
+
                         _stablePlayerState.update {
-                             it.copy(currentPosition = currentPosition, totalDuration = duration)
+                             it.copy(
+                                 currentPosition = if (isRemotelySeeking) it.currentPosition else currentPosition,
+                                 totalDuration = duration,
+                                 isPlaying = isRemotePlaying
+                             )
                         }
                     }
                 } else {
                      val controller = mediaController
                      // Media3: Check isPlaying or playbackState == READY/BUFFERING
                      if (controller != null && controller.isPlaying && !isSeeking) {
-                         val currentPosition = controller.currentPosition
-                         val duration = controller.duration
+                         val visibleSong = _stablePlayerState.value.currentSong
+                         val currentMediaId = controller.currentMediaItem?.mediaId
+                         val hasMediaMismatch = visibleSong?.id != null &&
+                             currentMediaId != null &&
+                             visibleSong.id != currentMediaId
+
+                         if (hasMediaMismatch) {
+                             Timber.tag(TAG).v(
+                                 "Skipping local progress tick due media mismatch (visible=%s, player=%s)",
+                                 visibleSong?.id,
+                                 currentMediaId
+                             )
+                             delay(500)
+                             continue
+                         }
+
+                         val currentPosition = controller.currentPosition.coerceAtLeast(0L)
+                         val songDurationHint = visibleSong?.duration ?: 0L
+                         val duration = resolveEffectiveDuration(
+                             reportedDurationMs = controller.duration,
+                             songDurationHintMs = songDurationHint,
+                             currentPositionMs = currentPosition
+                         )
                          
                          listeningStatsTracker.onProgress(currentPosition, true)
                          

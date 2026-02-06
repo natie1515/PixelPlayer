@@ -91,7 +91,8 @@ object AppModule {
             PixelPlayDatabase.MIGRATION_14_15,
             PixelPlayDatabase.MIGRATION_15_16,
             PixelPlayDatabase.MIGRATION_16_17,
-            PixelPlayDatabase.MIGRATION_17_18
+            PixelPlayDatabase.MIGRATION_17_18,
+            PixelPlayDatabase.MIGRATION_18_19
         )
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
@@ -212,7 +213,8 @@ object AppModule {
         telegramCacheManager: com.theveloper.pixelplay.data.telegram.TelegramCacheManager,
         telegramRepository: com.theveloper.pixelplay.data.telegram.TelegramRepository,
         songRepository: com.theveloper.pixelplay.data.repository.SongRepository,
-        favoritesDao: FavoritesDao
+        favoritesDao: FavoritesDao,
+        artistImageRepository: ArtistImageRepository
     ): MusicRepository {
         return MusicRepositoryImpl(
             context = context,
@@ -224,7 +226,8 @@ object AppModule {
             telegramCacheManager = telegramCacheManager,
             telegramRepository = telegramRepository,
             songRepository = songRepository,
-            favoritesDao = favoritesDao
+            favoritesDao = favoritesDao,
+            artistImageRepository = artistImageRepository
         )
 
     }

@@ -7,11 +7,18 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -31,6 +38,7 @@ fun ToggleSegmentButton(
     activeColor: Color,
     inactiveColor: Color = Color.Gray,
     activeContentColor: Color = LocalMaterialTheme.current.onPrimary,
+    inactiveContentColor: Color = LocalMaterialTheme.current.onSurfaceVariant,
     activeCornerRadius: Dp = 8.dp,
     onClick: () -> Unit,
     iconId: Int,
@@ -47,7 +55,7 @@ fun ToggleSegmentButton(
         Icon(
             painter = painterResource(iconId),
             contentDescription = contentDesc,
-            tint = if (active) activeContentColor else LocalMaterialTheme.current.primary,
+            tint = if (active) activeContentColor else inactiveContentColor,
             modifier = Modifier.size(24.dp)
         )
     }
@@ -60,6 +68,7 @@ fun ToggleSegmentButton(
     activeColor: Color,
     inactiveColor: Color = Color.Gray,
     activeContentColor: Color = LocalMaterialTheme.current.onPrimary,
+    inactiveContentColor: Color = LocalMaterialTheme.current.onSurfaceVariant,
     activeCornerRadius: Dp = 8.dp,
     onClick: () -> Unit,
     imageVector: ImageVector,
@@ -76,7 +85,7 @@ fun ToggleSegmentButton(
         Icon(
             imageVector = imageVector,
             contentDescription = contentDesc,
-            tint = if (active) activeContentColor else LocalMaterialTheme.current.primary,
+            tint = if (active) activeContentColor else inactiveContentColor,
             modifier = Modifier.size(24.dp)
         )
     }
@@ -108,6 +117,49 @@ fun ToggleSegmentButton(
             style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
         )
+    }
+}
+
+@Composable
+fun ToggleSegmentButton(
+    modifier: Modifier,
+    active: Boolean,
+    activeColor: Color,
+    inactiveColor: Color = Color.Gray,
+    activeContentColor: Color = LocalMaterialTheme.current.onPrimary,
+    inactiveContentColor: Color = LocalMaterialTheme.current.onSurfaceVariant,
+    activeCornerRadius: Dp = 8.dp,
+    onClick: () -> Unit,
+    text: String,
+    imageVector: ImageVector
+) {
+    ToggleSegmentButtonContainer(
+        modifier = modifier,
+        active = active,
+        activeColor = activeColor,
+        inactiveColor = inactiveColor,
+        activeCornerRadius = activeCornerRadius,
+        onClick = onClick
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        ) {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = null,
+                tint = if (active) activeContentColor else inactiveContentColor,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = text,
+                color = if (active) activeContentColor else inactiveContentColor,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            )
+        }
     }
 }
 

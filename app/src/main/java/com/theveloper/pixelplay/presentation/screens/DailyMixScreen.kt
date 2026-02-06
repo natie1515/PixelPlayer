@@ -83,6 +83,7 @@ import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import com.theveloper.pixelplay.presentation.components.subcomps.EnhancedSongListItem
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -204,7 +205,7 @@ fun DailyMixScreen(
 
             PlaylistBottomSheet(
                 playlistUiState = playlistUiState,
-                song = song,
+                songs = listOf(song),
                 onDismiss = { showPlaylistBottomSheet = false },
                 bottomBarHeight = bottomBarHeightDp,
                 playerViewModel = playerViewModel,
@@ -308,7 +309,7 @@ fun DailyMixScreen(
                         isPlaying = currentSongId == song.id && isPlaying,
                         onClick = { playerViewModel.showAndPlaySong(song, dailyMixSongs, "Daily Mix", isVoluntaryPlay = false) },
                         onMoreOptionsClick = {
-                            selectedSongForInfo = it
+                            selectedSongForInfo = song
                             showSongInfoSheet = true
                         }
                     )

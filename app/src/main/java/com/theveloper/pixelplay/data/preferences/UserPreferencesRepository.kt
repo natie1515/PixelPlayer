@@ -14,6 +14,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.Player
 import com.theveloper.pixelplay.data.model.Playlist
 import com.theveloper.pixelplay.data.model.SortOption // Added import
+import com.theveloper.pixelplay.data.model.FolderSource
 import com.theveloper.pixelplay.data.model.LyricsSourcePreference
 import com.theveloper.pixelplay.data.model.TransitionSettings
 import com.theveloper.pixelplay.data.equalizer.EqualizerPreset // Added import
@@ -78,6 +79,7 @@ constructor(
         // val GLOBAL_THEME_PREFERENCE = stringPreferencesKey("global_theme_preference_v2") //
         // Removed
         val PLAYER_THEME_PREFERENCE = stringPreferencesKey("player_theme_preference_v2")
+        val ALBUM_ART_PALETTE_STYLE = stringPreferencesKey("album_art_palette_style_v1")
         val APP_THEME_MODE = stringPreferencesKey("app_theme_mode")
         val FAVORITE_SONG_IDS = stringSetPreferencesKey("favorite_song_ids")
         val USER_PLAYLISTS = stringPreferencesKey("user_playlists_json_v1")
@@ -89,6 +91,7 @@ constructor(
         val ALBUMS_SORT_OPTION = stringPreferencesKey("albums_sort_option")
         val ARTISTS_SORT_OPTION = stringPreferencesKey("artists_sort_option")
         val PLAYLISTS_SORT_OPTION = stringPreferencesKey("playlists_sort_option")
+        val FOLDERS_SORT_OPTION = stringPreferencesKey("folders_sort_option")
         val LIKED_SONGS_SORT_OPTION = stringPreferencesKey("liked_songs_sort_option")
 
         // UI State Keys
@@ -109,10 +112,14 @@ constructor(
         val LIBRARY_TABS_ORDER = stringPreferencesKey("library_tabs_order")
         val IS_FOLDER_FILTER_ACTIVE = booleanPreferencesKey("is_folder_filter_active")
         val IS_FOLDERS_PLAYLIST_VIEW = booleanPreferencesKey("is_folders_playlist_view")
+        val FOLDERS_SOURCE = stringPreferencesKey("folders_source")
+        val FOLDER_BACK_GESTURE_NAVIGATION = booleanPreferencesKey("folder_back_gesture_navigation")
         val USE_SMOOTH_CORNERS = booleanPreferencesKey("use_smooth_corners")
         val KEEP_PLAYING_IN_BACKGROUND = booleanPreferencesKey("keep_playing_in_background")
         val IS_CROSSFADE_ENABLED = booleanPreferencesKey("is_crossfade_enabled")
         val CROSSFADE_DURATION = intPreferencesKey("crossfade_duration")
+        val CUSTOM_GENRES = androidx.datastore.preferences.core.stringSetPreferencesKey("custom_genres")
+        val CUSTOM_GENRE_ICONS = stringPreferencesKey("custom_genre_icons") // JSON Map<String, Int>
         val REPEAT_MODE = intPreferencesKey("repeat_mode")
         val IS_SHUFFLE_ON = booleanPreferencesKey("is_shuffle_on")
         val PERSISTENT_SHUFFLE_ENABLED = booleanPreferencesKey("persistent_shuffle_enabled")
@@ -170,8 +177,15 @@ constructor(
         // Developer Options
         val ALBUM_ART_QUALITY = stringPreferencesKey("album_art_quality")
         val TAP_BACKGROUND_CLOSES_PLAYER = booleanPreferencesKey("tap_background_closes_player")
+        val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         val IMMERSIVE_LYRICS_ENABLED = booleanPreferencesKey("immersive_lyrics_enabled")
         val IMMERSIVE_LYRICS_TIMEOUT = longPreferencesKey("immersive_lyrics_timeout")
+        
+        // Genre View Preference
+        val IS_GENRE_GRID_VIEW = booleanPreferencesKey("is_genre_grid_view")
+        
+        // Album View Preference
+        val IS_ALBUMS_LIST_VIEW = booleanPreferencesKey("is_albums_list_view")
     }
 
     val appRebrandDialogShownFlow: Flow<Boolean> =
@@ -289,9 +303,55 @@ constructor(
             }
 
     suspend fun setCrossfadeDuration(duration: Int) {
-        dataStore.edit { preferences -> preferences[PreferencesKeys.CROSSFADE_DURATION] = duration }
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.CROSSFADE_DURATION] = duration
+        }
     }
 
+    // Custom Genres Names
+    val customGenresFlow: Flow<Set<String>> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.CUSTOM_GENRES] ?: emptySet()
+        }
+
+    // Custom Genres Icons (JSON Map: Name -> ResId)
+    val customGenreIconsFlow: Flow<Map<String, Int>> =
+        dataStore.data.map { preferences ->
+            val jsonString = preferences[PreferencesKeys.CUSTOM_GENRE_ICONS]
+            if (jsonString != null) {
+                try {
+                    json.decodeFromString<Map<String, Int>>(jsonString)
+                } catch (e: Exception) {
+                    emptyMap()
+                }
+            } else {
+                emptyMap()
+            }
+        }
+
+    suspend fun addCustomGenre(genre: String, iconResId: Int? = null) {
+        dataStore.edit { preferences ->
+            val currentGenres = preferences[PreferencesKeys.CUSTOM_GENRES] ?: emptySet()
+            preferences[PreferencesKeys.CUSTOM_GENRES] = currentGenres + genre
+            
+            if (iconResId != null) {
+                val currentIconsJson = preferences[PreferencesKeys.CUSTOM_GENRE_ICONS]
+                val currentIcons = if (currentIconsJson != null) {
+                    try {
+                        json.decodeFromString<Map<String, Int>>(currentIconsJson)
+                    } catch (e: Exception) {
+                        emptyMap()
+                    }
+                } else {
+                    emptyMap()
+                }
+                
+                val newIcons = currentIcons.toMutableMap()
+                newIcons[genre] = iconResId
+                preferences[PreferencesKeys.CUSTOM_GENRE_ICONS] = json.encodeToString(newIcons)
+            }
+        }
+    }
     val repeatModeFlow: Flow<Int> =
             dataStore.data.map { preferences ->
                 preferences[PreferencesKeys.REPEAT_MODE] ?: Player.REPEAT_MODE_OFF
@@ -557,6 +617,28 @@ constructor(
         }
     }
 
+    val isGenreGridViewFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.IS_GENRE_GRID_VIEW] ?: true // Default to Grid (true)
+        }
+
+    suspend fun setGenreGridView(isGrid: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.IS_GENRE_GRID_VIEW] = isGrid
+        }
+    }
+
+    val isAlbumsListViewFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.IS_ALBUMS_LIST_VIEW] ?: false // Default to Grid (false)
+        }
+
+    suspend fun setAlbumsListView(isList: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.IS_ALBUMS_LIST_VIEW] = isList
+        }
+    }
+
     val lastDailyMixUpdateFlow: Flow<Long> =
             dataStore.data.map { preferences ->
                 preferences[PreferencesKeys.LAST_DAILY_MIX_UPDATE] ?: 0L
@@ -587,6 +669,13 @@ constructor(
             dataStore.data.map { preferences ->
                 preferences[PreferencesKeys.PLAYER_THEME_PREFERENCE]
                         ?: ThemePreference.ALBUM_ART // Default to Album Art
+            }
+
+    val albumArtPaletteStyleFlow: Flow<AlbumArtPaletteStyle> =
+            dataStore.data.map { preferences ->
+                AlbumArtPaletteStyle.fromStorageKey(
+                    preferences[PreferencesKeys.ALBUM_ART_PALETTE_STYLE]
+                )
             }
 
     val appThemeModeFlow: Flow<String> =
@@ -892,6 +981,12 @@ constructor(
         }
     }
 
+    suspend fun setAlbumArtPaletteStyle(style: AlbumArtPaletteStyle) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.ALBUM_ART_PALETTE_STYLE] = style.storageKey
+        }
+    }
+
     suspend fun setAppThemeMode(themeMode: String) {
         dataStore.edit { preferences -> preferences[PreferencesKeys.APP_THEME_MODE] = themeMode }
     }
@@ -958,6 +1053,16 @@ constructor(
                         .storageKey
             }
 
+    val foldersSortOptionFlow: Flow<String> =
+            dataStore.data.map { preferences ->
+                SortOption.fromStorageKey(
+                                preferences[PreferencesKeys.FOLDERS_SORT_OPTION],
+                                SortOption.FOLDERS,
+                                SortOption.FolderNameAZ
+                        )
+                        .storageKey
+            }
+
     val likedSongsSortOptionFlow: Flow<String> =
             dataStore.data.map { preferences ->
                 SortOption.fromStorageKey(
@@ -991,6 +1096,12 @@ constructor(
     suspend fun setPlaylistsSortOption(optionKey: String) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.PLAYLISTS_SORT_OPTION] = optionKey
+        }
+    }
+
+    suspend fun setFoldersSortOption(optionKey: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.FOLDERS_SORT_OPTION] = optionKey
         }
     }
 
@@ -1045,6 +1156,12 @@ constructor(
                     PreferencesKeys.PLAYLISTS_SORT_OPTION,
                     SortOption.PLAYLISTS,
                     SortOption.PlaylistNameAZ
+            )
+            migrateSortPreference(
+                    preferences,
+                    PreferencesKeys.FOLDERS_SORT_OPTION,
+                    SortOption.FOLDERS,
+                    SortOption.FolderNameAZ
             )
             migrateSortPreference(
                     preferences,
@@ -1298,6 +1415,16 @@ constructor(
             preferences[PreferencesKeys.IS_FOLDERS_PLAYLIST_VIEW] ?: false
         }
 
+    val foldersSourceFlow: Flow<FolderSource> = dataStore.data
+        .map { preferences ->
+            FolderSource.fromStorageKey(preferences[PreferencesKeys.FOLDERS_SOURCE])
+        }
+
+    val folderBackGestureNavigationFlow: Flow<Boolean> = dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.FOLDER_BACK_GESTURE_NAVIGATION] ?: false
+        }
+
     val useSmoothCornersFlow: Flow<Boolean> = dataStore.data
         .map { preferences ->
             preferences[PreferencesKeys.USE_SMOOTH_CORNERS] ?: true
@@ -1312,6 +1439,18 @@ constructor(
     suspend fun setFoldersPlaylistView(isPlaylistView: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.IS_FOLDERS_PLAYLIST_VIEW] = isPlaylistView
+        }
+    }
+
+    suspend fun setFoldersSource(source: FolderSource) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.FOLDERS_SOURCE] = source.storageKey
+        }
+    }
+
+    suspend fun setFolderBackGestureNavigation(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.FOLDER_BACK_GESTURE_NAVIGATION] = enabled
         }
     }
 
@@ -1483,6 +1622,109 @@ constructor(
     suspend fun setTapBackgroundClosesPlayer(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.TAP_BACKGROUND_CLOSES_PLAYER] = enabled
+        }
+    }
+
+    val hapticsEnabledFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.HAPTICS_ENABLED] ?: true
+        }
+
+    suspend fun setHapticsEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.HAPTICS_ENABLED] = enabled
+        }
+    }
+
+    suspend fun exportPreferencesForBackup(): List<PreferenceBackupEntry> {
+        val snapshot = dataStore.data.first().asMap()
+        return snapshot.mapNotNull { (key, value) ->
+            val keyName = key.name
+            when (value) {
+                is String -> PreferenceBackupEntry(
+                    key = keyName,
+                    type = "string",
+                    stringValue = value
+                )
+                is Int -> PreferenceBackupEntry(
+                    key = keyName,
+                    type = "int",
+                    intValue = value
+                )
+                is Long -> PreferenceBackupEntry(
+                    key = keyName,
+                    type = "long",
+                    longValue = value
+                )
+                is Boolean -> PreferenceBackupEntry(
+                    key = keyName,
+                    type = "boolean",
+                    booleanValue = value
+                )
+                is Float -> PreferenceBackupEntry(
+                    key = keyName,
+                    type = "float",
+                    floatValue = value
+                )
+                is Double -> PreferenceBackupEntry(
+                    key = keyName,
+                    type = "double",
+                    doubleValue = value
+                )
+                is Set<*> -> {
+                    val stringSet = value.filterIsInstance<String>().toSet()
+                    PreferenceBackupEntry(
+                        key = keyName,
+                        type = "string_set",
+                        stringSetValue = stringSet
+                    )
+                }
+                else -> null
+            }
+        }
+    }
+
+    suspend fun importPreferencesFromBackup(
+        entries: List<PreferenceBackupEntry>,
+        clearExisting: Boolean = true
+    ) {
+        dataStore.edit { preferences ->
+            if (clearExisting) {
+                preferences.clear()
+            }
+
+            entries.forEach { entry ->
+                when (entry.type) {
+                    "string" -> {
+                        val value = entry.stringValue ?: return@forEach
+                        preferences[stringPreferencesKey(entry.key)] = value
+                    }
+                    "int" -> {
+                        val value = entry.intValue ?: return@forEach
+                        preferences[intPreferencesKey(entry.key)] = value
+                    }
+                    "long" -> {
+                        val value = entry.longValue ?: return@forEach
+                        preferences[longPreferencesKey(entry.key)] = value
+                    }
+                    "boolean" -> {
+                        val value = entry.booleanValue ?: return@forEach
+                        preferences[booleanPreferencesKey(entry.key)] = value
+                    }
+                    "float" -> {
+                        val value = entry.floatValue ?: return@forEach
+                        preferences[androidx.datastore.preferences.core.floatPreferencesKey(entry.key)] = value
+                    }
+                    "double" -> {
+                        val value = entry.doubleValue ?: return@forEach
+                        preferences[androidx.datastore.preferences.core.doublePreferencesKey(entry.key)] = value
+                    }
+                    "string_set" -> {
+                        val value = entry.stringSetValue ?: return@forEach
+                        preferences[stringSetPreferencesKey(entry.key)] = value
+                    }
+                }
+            }
         }
     }
 }

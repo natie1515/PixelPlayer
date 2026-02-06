@@ -11,6 +11,7 @@ import android.provider.MediaStore
 import android.util.Log
 
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.repository.ArtistImageRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -18,11 +19,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
-import com.theveloper.pixelplay.data.database.FavoritesDao
-import com.theveloper.pixelplay.data.repository.SongRepository
-// import kotlinx.coroutines.withContext // May not be needed for Flow transformations
 import androidx.core.net.toUri
 import com.theveloper.pixelplay.data.database.ArtistEntity
+import com.theveloper.pixelplay.data.database.FavoritesDao
 import com.theveloper.pixelplay.data.database.MusicDao
 import com.theveloper.pixelplay.data.database.SearchHistoryDao
 import com.theveloper.pixelplay.data.database.SearchHistoryEntity
@@ -46,27 +45,33 @@ import com.theveloper.pixelplay.data.model.Playlist
 import com.theveloper.pixelplay.data.model.SearchFilterType
 import com.theveloper.pixelplay.data.model.SearchHistoryItem
 import com.theveloper.pixelplay.data.model.SearchResultItem
+import com.theveloper.pixelplay.data.model.SortOption
+import com.theveloper.pixelplay.data.model.FolderSource
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.utils.DirectoryRuleResolver
 import com.theveloper.pixelplay.utils.LogUtils
-
+import com.theveloper.pixelplay.utils.StorageType
+import com.theveloper.pixelplay.utils.StorageUtils
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first 
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.File
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
 import androidx.paging.filter
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import java.io.File
-import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
@@ -80,7 +85,8 @@ class MusicRepositoryImpl @Inject constructor(
     private val telegramCacheManager: com.theveloper.pixelplay.data.telegram.TelegramCacheManager,
     private val telegramRepository: com.theveloper.pixelplay.data.telegram.TelegramRepository,
     private val songRepository: SongRepository,
-    private val favoritesDao: FavoritesDao
+    private val favoritesDao: FavoritesDao,
+    private val artistImageRepository: ArtistImageRepository
 ) : MusicRepository {
 
     private val directoryScanMutex = Mutex()
@@ -171,17 +177,38 @@ class MusicRepositoryImpl @Inject constructor(
     }
 
     override fun getArtists(): Flow<List<Artist>> {
-        return getAudioFiles().map { songs ->
-            songs.groupBy { it.artistId }
+        // Combine MediaStore songs (for filtering/grouping) with DB Artists (for Image URLs)
+        return combine(
+            getAudioFiles(),
+            musicDao.getAllArtistsRaw()
+        ) { songs, dbArtists ->
+            val dbArtistsMap = dbArtists.associateBy { it.id }
+            
+            val artists = songs.groupBy { it.artistId }
                 .map { (artistId, songs) ->
                     val first = songs.first()
+                    // Get image URL from DB cache if available
+                    val imageUrl = dbArtistsMap[artistId]?.imageUrl
+                    
                     Artist(
                         id = artistId,
                         name = first.artist,
-                        songCount = songs.size
+                        songCount = songs.size,
+                        imageUrl = imageUrl
                     )
                 }
                 .sortedBy { it.name.lowercase() }
+            
+            // Trigger prefetch for missing images
+            // We use a separate list to avoid passing the entire heavy payload to the IO dispatcher if not needed
+            val missingImages = artists.filter { it.imageUrl == null }.map { it.id to it.name }
+            if (missingImages.isNotEmpty()) {
+                // Ensure this doesn't block the UI flow emission
+               kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    artistImageRepository.prefetchArtistImages(missingImages)
+               }
+            }
+            artists
         }.flowOn(Dispatchers.Default)
     }
 
@@ -483,7 +510,14 @@ class MusicRepositoryImpl @Inject constructor(
             }
 
             val dynamicGenres = genresMap.keys.mapNotNull { genreName ->
-                val id = if (genreName.equals("Unknown", ignoreCase = true)) "unknown" else genreName.lowercase().replace(" ", "_")
+                val id = if (genreName.equals("Unknown", ignoreCase = true)) {
+                    "unknown"
+                } else {
+                    genreName
+                        .lowercase()
+                        .replace(" ", "_")
+                        .replace("/", "_")
+                }
                 // Generate colors dynamically or use a default for "Unknown"
                 val colorInt = genreName.hashCode()
                 val lightColorHex = "#${(colorInt and 0x00FFFFFF).toString(16).padStart(6, '0').uppercase()}"
@@ -554,13 +588,14 @@ class MusicRepositoryImpl @Inject constructor(
             getAudioFiles(),
             userPreferencesRepository.allowedDirectoriesFlow,
             userPreferencesRepository.blockedDirectoriesFlow,
-            userPreferencesRepository.isFolderFilterActiveFlow
-        ) { songs, allowedDirs, blockedDirs, isFolderFilterActive ->
+            userPreferencesRepository.isFolderFilterActiveFlow,
+            userPreferencesRepository.foldersSourceFlow
+        ) { songs, allowedDirs, blockedDirs, isFolderFilterActive, folderSource ->
             val resolver = DirectoryRuleResolver(
                 allowedDirs.map(::normalizePath).toSet(),
                 blockedDirs.map(::normalizePath).toSet()
             )
-            val songsToProcess = if (isFolderFilterActive && blockedDirs.isNotEmpty()) {
+            val filteredByRules = if (isFolderFilterActive && blockedDirs.isNotEmpty()) {
                 songs.filter { song ->
                     val songDir = File(song.path).parentFile ?: return@filter false
                     val normalized = normalizePath(songDir.path)
@@ -568,6 +603,32 @@ class MusicRepositoryImpl @Inject constructor(
                 }
             } else {
                 songs
+            }
+
+            if (filteredByRules.isEmpty()) return@combine emptyList()
+
+            val storages = StorageUtils.getAvailableStorages(context)
+            val internalStorageRoot = storages
+                .firstOrNull { it.storageType == StorageType.INTERNAL }
+                ?.path
+                ?.path
+                ?: Environment.getExternalStorageDirectory().path
+            val sdStorageRoot = storages
+                .firstOrNull { it.storageType == StorageType.SD_CARD }
+                ?.path
+                ?.path
+
+            val selectedRootPath = when (folderSource) {
+                FolderSource.INTERNAL -> internalStorageRoot
+                FolderSource.SD_CARD -> sdStorageRoot ?: return@combine emptyList()
+            }
+            val normalizedSelectedRoot = normalizePath(selectedRootPath)
+
+            val songsToProcess = filteredByRules.filter { song ->
+                val songDir = File(song.path).parentFile ?: return@filter false
+                val normalizedDir = normalizePath(songDir.path)
+                normalizedDir == normalizedSelectedRoot ||
+                    normalizedDir.startsWith("$normalizedSelectedRoot/")
             }
 
             if (songsToProcess.isEmpty()) return@combine emptyList()
@@ -584,8 +645,9 @@ class MusicRepositoryImpl @Inject constructor(
             // Optimization: Group songs by parent folder first to reduce File object creations and loop iterations
             val songsByFolder = songsToProcess.groupBy { File(it.path).parent }
 
-            songsByFolder.forEach { (folderPath, songsInFolder) ->
-                if (folderPath != null) {
+            songsByFolder.forEach { (rawFolderPath, songsInFolder) ->
+                if (rawFolderPath != null) {
+                    val folderPath = normalizePath(rawFolderPath)
                     val folderFile = File(folderPath)
                     // Create or get the leaf folder
                     val leafFolder = tempFolders.getOrPut(folderPath) { TempFolder(folderPath, folderFile.name) }
@@ -597,7 +659,7 @@ class MusicRepositoryImpl @Inject constructor(
 
                     while (currentFile.parentFile != null) {
                         val parentFile = currentFile.parentFile!!
-                        val parentPath = parentFile.path
+                        val parentPath = normalizePath(parentFile.path)
 
                         val parentFolder = tempFolders.getOrPut(parentPath) { TempFolder(parentPath, parentFile.name) }
                         val added = parentFolder.subFolderPaths.add(currentPath)
@@ -634,8 +696,7 @@ class MusicRepositoryImpl @Inject constructor(
                 )
             }
 
-            val storageRootPath = Environment.getExternalStorageDirectory().path
-            val rootTempFolder = tempFolders[storageRootPath]
+            val rootTempFolder = tempFolders[normalizedSelectedRoot]
 
             val result = rootTempFolder?.subFolderPaths?.mapNotNull { path ->
                 buildImmutableFolder(path, mutableSetOf())
@@ -644,9 +705,20 @@ class MusicRepositoryImpl @Inject constructor(
             // Fallback for devices that might not use the standard storage root path
             if (result.isEmpty() && tempFolders.isNotEmpty()) {
                  val allSubFolderPaths = tempFolders.values.flatMap { it.subFolderPaths }.toSet()
-                 val topLevelPaths = tempFolders.keys - allSubFolderPaths
+                 val topLevelPaths = (tempFolders.keys - allSubFolderPaths)
+                     .filter { topLevelPath ->
+                         topLevelPath == normalizedSelectedRoot ||
+                             topLevelPath.startsWith("$normalizedSelectedRoot/")
+                     }
+                     .flatMap { topLevelPath ->
+                         if (topLevelPath == normalizedSelectedRoot) {
+                             tempFolders[topLevelPath]?.subFolderPaths ?: emptySet()
+                         } else {
+                             setOf(topLevelPath)
+                         }
+                     }
                  return@combine topLevelPaths
-                     .mapNotNull { buildImmutableFolder(it, mutableSetOf()) }
+                     .mapNotNull { topLevelPath -> buildImmutableFolder(topLevelPath, mutableSetOf()) }
                      .filter { it.totalSongCount > 0 }
                     .sortedBy { it.name.lowercase() }
              }

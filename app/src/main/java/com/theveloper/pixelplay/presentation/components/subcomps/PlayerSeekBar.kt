@@ -16,7 +16,12 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +54,15 @@ fun PlayerSeekBar(
         }
     }
 
+    var isUserSeeking by remember { mutableStateOf(false) }
+    var seekFraction by remember { mutableFloatStateOf(progressFraction) }
+
+    LaunchedEffect(progressFraction) {
+        if (!isUserSeeking) {
+            seekFraction = progressFraction
+        }
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -74,11 +88,16 @@ fun PlayerSeekBar(
         WavySliderExpressive(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp),
+                .padding(horizontal = 0.dp),
                 //.weight(0.8f),
-            value = progressFraction,
+            value = seekFraction,
             onValueChange = { newFraction ->
-                onSeek((newFraction * totalDuration).roundToLong())
+                isUserSeeking = true
+                seekFraction = newFraction
+            },
+            onValueChangeFinished = {
+                onSeek((seekFraction * totalDuration).roundToLong())
+                isUserSeeking = false
             },
             strokeWidth = 5.dp, // Was trackHeight
             thumbRadius = 8.dp,

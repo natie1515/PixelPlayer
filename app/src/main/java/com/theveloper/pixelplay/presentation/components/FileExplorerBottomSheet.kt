@@ -330,7 +330,11 @@ fun FileExplorerContent(
                 navigationEnabled = true
             )
 
-            Box(modifier = Modifier.weight(1f)) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 18.dp)
+            ) {
                 AnimatedContent(
                     targetState = Triple(currentPath, directoryChildren, isLoading),
                     label = "directory_content",
@@ -347,7 +351,7 @@ fun FileExplorerContent(
                             LazyColumn(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 18.dp)
+                                    // Padding horizontal moved to parent Box
                                     .clip(
                                         RoundedCornerShape(
                                             topEnd = 20.dp,
@@ -355,7 +359,8 @@ fun FileExplorerContent(
                                         )
                                     ),
                                 contentPadding = PaddingValues(
-                                    bottom = 24.dp
+                                    bottom = 24.dp,
+                                    end = if (listState.canScrollForward || listState.canScrollBackward) 24.dp else 0.dp
                                 ),
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 state = listState
@@ -390,6 +395,16 @@ fun FileExplorerContent(
                                     MaterialTheme.colorScheme.surfaceContainerLow
                                 )
                             )
+                        )
+                )
+                
+                ExpressiveScrollBar(
+                    listState = listState,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(
+                            top = 6.dp, 
+                            bottom = 88.dp // Match bottom content padding roughly (24) + FAB height (56) + spacing (8)
                         )
                 )
             }

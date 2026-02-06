@@ -68,6 +68,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.core.net.toUri
@@ -111,6 +112,7 @@ import com.theveloper.pixelplay.utils.LogUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.delay
+
 import kotlinx.coroutines.launch
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import javax.annotation.concurrent.Immutable
@@ -133,9 +135,6 @@ class MainActivity : ComponentActivity() {
     private var mediaControllerFuture: ListenableFuture<MediaController>? = null
     @Inject
     lateinit var userPreferencesRepository: UserPreferencesRepository // Inject here
-    @Inject
-    lateinit var syncManager: SyncManager
-    
     // For handling shortcut navigation - using StateFlow so composables can observe changes
     private val _pendingPlaylistNavigation = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     private val _pendingShuffleAll = kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -382,6 +381,7 @@ class MainActivity : ComponentActivity() {
         val navController = rememberNavController()
         val isSyncing by mainViewModel.isSyncing.collectAsState()
         val isLibraryEmpty by mainViewModel.isLibraryEmpty.collectAsState()
+        val hasCompletedInitialSync by mainViewModel.hasCompletedInitialSync.collectAsState()
         val syncProgress by mainViewModel.syncProgress.collectAsState()
         
         // Observe pending shuffle action
@@ -434,7 +434,7 @@ class MainActivity : ComponentActivity() {
         var loadingShownTimestamp by remember { mutableStateOf(0L) }
         val minimumDisplayDuration = 1500L // Show loading for at least 1.5 seconds
 
-        val shouldPotentiallyShowLoading = isSyncing && isLibraryEmpty
+        val shouldPotentiallyShowLoading = isSyncing && isLibraryEmpty && !hasCompletedInitialSync
 
         LaunchedEffect(shouldPotentiallyShowLoading) {
             if (shouldPotentiallyShowLoading) {
@@ -505,7 +505,8 @@ class MainActivity : ComponentActivity() {
                 Screen.ArtistSettings.route,
                 Screen.Equalizer.route,
                 Screen.SettingsCategory.route,
-                Screen.DelimiterConfig.route
+                Screen.DelimiterConfig.route,
+                Screen.PaletteStyle.route
             )
         }
         val shouldHideNavigationBar by remember(currentRoute, isSearchBarActive) {
@@ -527,8 +528,15 @@ class MainActivity : ComponentActivity() {
         }
 
         val navBarStyle by playerViewModel.navBarStyle.collectAsState()
+        val hapticsEnabled by playerViewModel.hapticsEnabled.collectAsState()
+        val rootView = LocalView.current
 
         val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+        LaunchedEffect(hapticsEnabled, rootView) {
+            rootView.isHapticFeedbackEnabled = hapticsEnabled
+            rootView.rootView?.isHapticFeedbackEnabled = hapticsEnabled
+        }
 
         val horizontalPadding = if (navBarStyle == NavBarStyle.DEFAULT) {
             if (systemNavBarInset > 30.dp) 14.dp else systemNavBarInset
@@ -667,6 +675,7 @@ class MainActivity : ComponentActivity() {
                                 navItems = commonNavItems,
                                 currentRoute = currentRoute,
                                 navBarStyle = navBarStyle,
+                                onSearchIconDoubleTap = { playerViewModel.onSearchNavIconDoubleTapped() },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -818,7 +827,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        syncManager.sync()
     }
 
 
