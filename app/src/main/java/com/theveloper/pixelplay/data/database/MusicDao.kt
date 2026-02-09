@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RawQuery
 import androidx.room.Transaction
+import androidx.room.Update
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.theveloper.pixelplay.utils.AudioMeta
 import kotlinx.coroutines.flow.Flow
@@ -15,14 +16,62 @@ import kotlinx.coroutines.flow.Flow
 interface MusicDao {
 
     // --- Insert Operations ---
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertSongs(songs: List<SongEntity>)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSongsIgnoreConflicts(songs: List<SongEntity>): List<Long>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAlbums(albums: List<AlbumEntity>)
+    @Update
+    suspend fun updateSongs(songs: List<SongEntity>)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertArtists(artists: List<ArtistEntity>)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAlbumsIgnoreConflicts(albums: List<AlbumEntity>): List<Long>
+
+    @Update
+    suspend fun updateAlbums(albums: List<AlbumEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertArtistsIgnoreConflicts(artists: List<ArtistEntity>): List<Long>
+
+    @Update
+    suspend fun updateArtists(artists: List<ArtistEntity>)
+
+    @Transaction
+    suspend fun insertSongs(songs: List<SongEntity>) {
+        if (songs.isEmpty()) return
+        val insertResults = insertSongsIgnoreConflicts(songs)
+        val songsToUpdate = mutableListOf<SongEntity>()
+        insertResults.forEachIndexed { index, rowId ->
+            if (rowId == -1L) songsToUpdate.add(songs[index])
+        }
+        if (songsToUpdate.isNotEmpty()) {
+            updateSongs(songsToUpdate)
+        }
+    }
+
+    @Transaction
+    suspend fun insertAlbums(albums: List<AlbumEntity>) {
+        if (albums.isEmpty()) return
+        val insertResults = insertAlbumsIgnoreConflicts(albums)
+        val albumsToUpdate = mutableListOf<AlbumEntity>()
+        insertResults.forEachIndexed { index, rowId ->
+            if (rowId == -1L) albumsToUpdate.add(albums[index])
+        }
+        if (albumsToUpdate.isNotEmpty()) {
+            updateAlbums(albumsToUpdate)
+        }
+    }
+
+    @Transaction
+    suspend fun insertArtists(artists: List<ArtistEntity>) {
+        if (artists.isEmpty()) return
+        val insertResults = insertArtistsIgnoreConflicts(artists)
+        val artistsToUpdate = mutableListOf<ArtistEntity>()
+        insertResults.forEachIndexed { index, rowId ->
+            if (rowId == -1L) artistsToUpdate.add(artists[index])
+        }
+        if (artistsToUpdate.isNotEmpty()) {
+            updateArtists(artistsToUpdate)
+        }
+    }
 
     @Transaction
     suspend fun insertMusicData(songs: List<SongEntity>, albums: List<AlbumEntity>, artists: List<ArtistEntity>) {
@@ -78,7 +127,7 @@ interface MusicDao {
             }
         }
         
-        // Upsert artists, albums, and songs (REPLACE strategy handles updates)
+        // Upsert artists, albums, and songs.
         insertArtists(artists)
         insertAlbums(albums)
         

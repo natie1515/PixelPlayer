@@ -111,6 +111,8 @@ class CastStateHolder @Inject constructor(
     }
     
     fun setCastPlayer(player: CastPlayer?) {
+        if (_castPlayer === player) return
+        _castPlayer?.release()
         _castPlayer = player
     }
     
@@ -157,6 +159,7 @@ class CastStateHolder @Inject constructor(
     
     fun clearRemoteState() {
         _castSession.value = null
+        _castPlayer?.release()
         _castPlayer = null
         _isRemotePlaybackActive.value = false
         _isCastConnecting.value = false

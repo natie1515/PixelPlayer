@@ -747,6 +747,7 @@ constructor(
             val albumId: Long,
             val artistId: Long,
             val filePath: String,
+            val mimeType: String?,
             val title: String,
             val artist: String,
             val album: String,
@@ -781,6 +782,7 @@ constructor(
                         MediaStore.Audio.Media.ALBUM_ARTIST,
                         MediaStore.Audio.Media.DURATION,
                         MediaStore.Audio.Media.DATA,
+                        MediaStore.Audio.Media.MIME_TYPE,
                         MediaStore.Audio.Media.TRACK,
                         MediaStore.Audio.Media.YEAR,
                         MediaStore.Audio.Media.DATE_MODIFIED
@@ -825,6 +827,7 @@ constructor(
                     val albumArtistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ARTIST)
                     val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                     val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                    val mimeTypeCol = cursor.getColumnIndex(MediaStore.Audio.Media.MIME_TYPE)
                     val trackCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
                     val yearCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
                     val dateAddedCol =
@@ -851,6 +854,7 @@ constructor(
                                         albumId = cursor.getLong(albumIdCol),
                                         artistId = cursor.getLong(artistIdCol),
                                         filePath = cursor.getString(dataCol) ?: "",
+                                        mimeType = if (mimeTypeCol >= 0) cursor.getString(mimeTypeCol) else null,
                                         title =
                                                 cursor.getString(titleCol)
                                                         .normalizeMetadataTextOrEmpty()
@@ -1013,7 +1017,7 @@ constructor(
                             if (seconds > 0) TimeUnit.SECONDS.toMillis(seconds)
                             else System.currentTimeMillis()
                         },
-                mimeType = audioMetadata?.mimeType,
+                mimeType = audioMetadata?.mimeType ?: raw.mimeType,
                 sampleRate = audioMetadata?.sampleRate,
                 bitrate = audioMetadata?.bitrate
         )
