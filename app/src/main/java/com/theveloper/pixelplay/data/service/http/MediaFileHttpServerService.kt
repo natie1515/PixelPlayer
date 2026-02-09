@@ -2,11 +2,19 @@ package com.theveloper.pixelplay.data.service.http
 
 import android.app.Service
 import android.content.Context
+import android.content.ContentUris
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
+import android.provider.OpenableColumns
+import android.util.Log
 import androidx.core.net.toUri
+import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import dagger.hilt.android.AndroidEntryPoint
 import io.ktor.http.ContentType
@@ -23,11 +31,18 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
+import java.io.EOFException
+import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Inet4Address
+import java.net.SocketException
+import java.nio.channels.ClosedChannelException
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import javax.inject.Inject
 import timber.log.Timber
@@ -41,6 +56,23 @@ class MediaFileHttpServerService : Service() {
     private var server: NettyApplicationEngine? = null
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private val castHttpLogTag = "CastHttpServer"
+    private val signatureMimeCache = mutableMapOf<String, String?>()
+    private val httpDateFormatter: DateTimeFormatter =
+        DateTimeFormatter.RFC_1123_DATE_TIME.withZone(ZoneOffset.UTC)
+    private val transparentPng1x1: ByteArray by lazy {
+        byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4.toByte(),
+            0x89.toByte(), 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9C.toByte(), 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4.toByte(), 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE.toByte(),
+            0x42, 0x60, 0x82.toByte()
+        )
+    }
 
     companion object {
         const val ACTION_START_SERVER = "ACTION_START_SERVER"
@@ -55,6 +87,21 @@ class MediaFileHttpServerService : Service() {
         NO_NETWORK_ADDRESS,
         START_EXCEPTION
     }
+
+    private data class AudioStreamSource(
+        val sourceLabel: String,
+        val fileSize: Long,
+        val lastModifiedEpochMs: Long?,
+        val inputStreamFactory: () -> InputStream
+    )
+
+    private data class ArtStreamSource(
+        val sourceLabel: String,
+        val contentType: ContentType,
+        val contentLength: Long?,
+        val lastModifiedEpochMs: Long?,
+        val inputStreamFactory: () -> InputStream
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -73,7 +120,7 @@ class MediaFileHttpServerService : Service() {
                 Timber.w("Ignoring unknown media server action: %s", intent.action)
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private fun startForegroundService() {
@@ -131,82 +178,141 @@ class MediaFileHttpServerService : Service() {
                                     return@get
                                 }
 
-                                val song = musicRepository.getSong(songId).firstOrNull()
+                                val song = resolveSongForServing(songId)
                                 if (song == null) {
+                                    Timber.tag(castHttpLogTag).w(
+                                        "GET /song unresolved songId=%s (repository+MediaStore fallback miss)",
+                                        songId
+                                    )
+                                    Log.e("PX_CAST_HTTP", "GET /song unresolved songId=$songId")
                                     call.respond(HttpStatusCode.NotFound, "Song not found")
                                     return@get
                                 }
 
                                 try {
                                     val uri = song.contentUriString.toUri()
-                                    val contentType = resolveAudioContentType(
-                                        song.mimeType ?: contentResolver.getType(uri)
-                                    )
-                                    contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                        val fileSize = pfd.statSize
-                                        val rangeHeader = call.request.headers[HttpHeaders.Range]
+                                    val contentType = resolveAudioContentType(resolvePreferredAudioMimeType(song, uri))
+                                    val rangeHeader = call.request.headers[HttpHeaders.Range]
+                                    val source = resolveAudioStreamSource(song, uri)
 
-                                        if (rangeHeader != null && fileSize > 0) {
-                                            val rangesSpecifier = io.ktor.http.parseRangesSpecifier(rangeHeader)
-                                            val ranges = rangesSpecifier?.ranges
-
-                                            if (ranges.isNullOrEmpty()) {
-                                                call.respond(HttpStatusCode.BadRequest, "Invalid range")
-                                                return@use
-                                            }
-
-                                            // We only handle the first range request for simplicity
-                                            val range = ranges.first()
-                                            val start = when (range) {
-                                                is io.ktor.http.ContentRange.Bounded -> range.from
-                                                is io.ktor.http.ContentRange.TailFrom -> range.from
-                                                is io.ktor.http.ContentRange.Suffix -> fileSize - range.lastCount
-                                                else -> 0L
-                                            }
-                                            val end = when (range) {
-                                                is io.ktor.http.ContentRange.Bounded -> range.to
-                                                is io.ktor.http.ContentRange.TailFrom -> fileSize - 1
-                                                is io.ktor.http.ContentRange.Suffix -> fileSize - 1
-                                                else -> fileSize - 1
-                                            }
-
-                                            val clampedStart = start.coerceAtLeast(0L)
-                                            val clampedEnd = end.coerceAtMost(fileSize - 1)
-                                            val length = clampedEnd - clampedStart + 1
-
-                                            if (length <= 0) {
-                                                call.respond(HttpStatusCode.RequestedRangeNotSatisfiable, "Range not satisfiable")
-                                                return@use
-                                            }
-
-                                            call.response.header(HttpHeaders.ContentRange, "bytes $clampedStart-$clampedEnd/$fileSize")
-                                            call.response.header(HttpHeaders.AcceptRanges, "bytes")
-                                            call.response.header(HttpHeaders.ContentLength, length.toString())
-
-                                            call.respondOutputStream(contentType, HttpStatusCode.PartialContent) {
-                                                FileInputStream(pfd.fileDescriptor).use { inputStream ->
-                                                    if (!skipFully(inputStream, clampedStart)) {
-                                                        return@use
-                                                    }
-                                                    copyLimited(inputStream, this, length)
-                                                }
-                                            }
-                                        } else {
-                                            if (fileSize > 0) {
-                                                call.response.header(HttpHeaders.AcceptRanges, "bytes")
-                                                call.response.header(HttpHeaders.ContentLength, fileSize.toString())
-                                            }
-                                            call.respondOutputStream(contentType) {
-                                                FileInputStream(pfd.fileDescriptor).use { inputStream ->
-                                                    inputStream.copyTo(this)
-                                                }
-                                            }
-                                        }
-                                    } ?: run {
+                                    if (source == null) {
+                                        Timber.tag(castHttpLogTag).w(
+                                            "GET /song failed to resolve source. songId=%s uri=%s path=%s mime=%s",
+                                            song.id,
+                                            song.contentUriString,
+                                            song.path,
+                                            song.mimeType
+                                        )
                                         call.respond(HttpStatusCode.NotFound, "File not found")
+                                        return@get
+                                    }
+
+                                    Timber.tag(castHttpLogTag).i(
+                                        "GET /song songId=%s source=%s range=%s size=%d type=%s",
+                                        song.id,
+                                        source.sourceLabel,
+                                        rangeHeader,
+                                        source.fileSize,
+                                        contentType
+                                    )
+                                    Log.i(
+                                        "PX_CAST_HTTP",
+                                        "GET /song songId=${song.id} source=${source.sourceLabel} range=$rangeHeader size=${source.fileSize} type=$contentType"
+                                    )
+                                    source.lastModifiedEpochMs?.let { lastModified ->
+                                        call.response.header(HttpHeaders.LastModified, formatHttpDate(lastModified))
+                                    }
+
+                                    call.respondWithAudioStream(
+                                        contentType = contentType,
+                                        fileSize = source.fileSize,
+                                        rangeHeader = rangeHeader
+                                    ) {
+                                        source.inputStreamFactory()
                                     }
                                 } catch (e: Exception) {
+                                    if (e.isClientAbortDuringResponse()) {
+                                        Timber.tag(castHttpLogTag).d(
+                                            "GET /song client disconnected. songId=%s uri=%s",
+                                            song.id,
+                                            song.contentUriString
+                                        )
+                                        Log.w(
+                                            "PX_CAST_HTTP",
+                                            "GET /song client_closed songId=${song.id} uri=${song.contentUriString} error=${e.javaClass.simpleName}"
+                                        )
+                                        return@get
+                                    }
+                                    Timber.tag(castHttpLogTag).e(
+                                        e,
+                                        "GET /song exception. songId=%s uri=%s",
+                                        song.id,
+                                        song.contentUriString
+                                    )
+                                    Log.e("PX_CAST_HTTP", "GET /song exception songId=${song.id} uri=${song.contentUriString}", e)
                                     call.respond(HttpStatusCode.InternalServerError, "Error serving file: ${e.message}")
+                                }
+                            }
+                            head("/song/{songId}") {
+                                val songId = call.parameters["songId"]
+                                if (songId == null) {
+                                    call.respond(HttpStatusCode.BadRequest)
+                                    return@head
+                                }
+
+                                val song = resolveSongForServing(songId)
+                                if (song == null) {
+                                    Timber.tag(castHttpLogTag).w(
+                                        "HEAD /song unresolved songId=%s (repository+MediaStore fallback miss)",
+                                        songId
+                                    )
+                                    Log.e("PX_CAST_HTTP", "HEAD /song unresolved songId=$songId")
+                                    call.respond(HttpStatusCode.NotFound)
+                                    return@head
+                                }
+
+                                try {
+                                    val uri = song.contentUriString.toUri()
+                                    val contentType = resolveAudioContentType(resolvePreferredAudioMimeType(song, uri))
+                                    val source = resolveAudioStreamSource(song, uri)
+
+                                    if (source == null) {
+                                    Timber.tag(castHttpLogTag).w(
+                                        "HEAD /song failed to resolve source. songId=%s uri=%s path=%s",
+                                        song.id,
+                                        song.contentUriString,
+                                        song.path
+                                    )
+                                    Log.w("PX_CAST_HTTP", "HEAD /song no source songId=${song.id} uri=${song.contentUriString}")
+                                    call.respond(HttpStatusCode.NotFound)
+                                    return@head
+                                }
+
+                                    call.response.header(HttpHeaders.ContentType, contentType.toString())
+                                    if (source.fileSize > 0) {
+                                        call.response.header(HttpHeaders.AcceptRanges, "bytes")
+                                        call.response.header(HttpHeaders.ContentLength, source.fileSize.toString())
+                                    }
+                                    source.lastModifiedEpochMs?.let { lastModified ->
+                                        call.response.header(HttpHeaders.LastModified, formatHttpDate(lastModified))
+                                    }
+                                    Timber.tag(castHttpLogTag).d(
+                                        "HEAD /song songId=%s source=%s size=%d type=%s",
+                                        song.id,
+                                        source.sourceLabel,
+                                        source.fileSize,
+                                        contentType
+                                    )
+                                    call.respond(HttpStatusCode.OK)
+                                } catch (e: Exception) {
+                                    if (e.isClientAbortDuringResponse()) {
+                                        Timber.tag(castHttpLogTag).d("HEAD /song client disconnected. songId=%s", song.id)
+                                        Log.w("PX_CAST_HTTP", "HEAD /song client_closed songId=${song.id} error=${e.javaClass.simpleName}")
+                                        return@head
+                                    }
+                                    Timber.tag(castHttpLogTag).e(e, "HEAD /song exception. songId=%s", song.id)
+                                    Log.e("PX_CAST_HTTP", "HEAD /song exception songId=${song.id}", e)
+                                    call.respond(HttpStatusCode.InternalServerError)
                                 }
                             }
                             get("/art/{songId}") {
@@ -216,19 +322,107 @@ class MediaFileHttpServerService : Service() {
                                     return@get
                                 }
 
-                                val song = musicRepository.getSong(songId).firstOrNull()
-                                if (song?.albumArtUriString == null) {
-                                    call.respond(HttpStatusCode.NotFound, "Album art not found")
+                                val song = resolveSongForServing(songId)
+                                if (song == null) {
+                                    Timber.tag(castHttpLogTag).w(
+                                        "GET /art unresolved songId=%s (repository+MediaStore fallback miss)",
+                                        songId
+                                    )
+                                    Log.e("PX_CAST_HTTP", "GET /art unresolved songId=$songId")
+                                    call.respond(HttpStatusCode.NotFound, "Song not found")
                                     return@get
                                 }
 
-                                val artUri = song.albumArtUriString.toUri()
-                                contentResolver.openInputStream(artUri)?.use { inputStream ->
-                                    val bytes = withContext(Dispatchers.IO) {
-                                        inputStream.readBytes()
+                                try {
+                                    val artSource = resolveArtStreamSource(song)
+                                    Timber.tag(castHttpLogTag).i(
+                                        "GET /art songId=%s source=%s length=%s type=%s",
+                                        song.id,
+                                        artSource.sourceLabel,
+                                        artSource.contentLength,
+                                        artSource.contentType
+                                    )
+                                    Log.i(
+                                        "PX_CAST_HTTP",
+                                        "GET /art songId=${song.id} source=${artSource.sourceLabel} len=${artSource.contentLength} type=${artSource.contentType}"
+                                    )
+                                    artSource.lastModifiedEpochMs?.let { lastModified ->
+                                        call.response.header(HttpHeaders.LastModified, formatHttpDate(lastModified))
                                     }
-                                    call.respondBytes(bytes, ContentType.Image.JPEG)
-                                } ?: call.respond(HttpStatusCode.InternalServerError, "Could not open album art file")
+                                    call.respondOutputStream(artSource.contentType) {
+                                        artSource.inputStreamFactory().use { inputStream ->
+                                            inputStream.copyTo(this)
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    if (e.isClientAbortDuringResponse()) {
+                                        Timber.tag(castHttpLogTag).d("GET /art client disconnected. songId=%s", song.id)
+                                        Log.w("PX_CAST_HTTP", "GET /art client_closed songId=${song.id} error=${e.javaClass.simpleName}")
+                                        return@get
+                                    }
+                                    Timber.tag(castHttpLogTag).e(e, "GET /art exception. songId=%s", song.id)
+                                    Log.e("PX_CAST_HTTP", "GET /art exception songId=${song.id}", e)
+                                    val fallbackSource = placeholderArtSource()
+                                    call.respondOutputStream(fallbackSource.contentType) {
+                                        fallbackSource.inputStreamFactory().use { inputStream ->
+                                            inputStream.copyTo(this)
+                                        }
+                                    }
+                                }
+                            }
+                            head("/art/{songId}") {
+                                val songId = call.parameters["songId"]
+                                if (songId == null) {
+                                    call.respond(HttpStatusCode.BadRequest)
+                                    return@head
+                                }
+
+                                val song = resolveSongForServing(songId)
+                                if (song == null) {
+                                    Timber.tag(castHttpLogTag).w(
+                                        "HEAD /art unresolved songId=%s (repository+MediaStore fallback miss)",
+                                        songId
+                                    )
+                                    Log.e("PX_CAST_HTTP", "HEAD /art unresolved songId=$songId")
+                                    call.respond(HttpStatusCode.NotFound)
+                                    return@head
+                                }
+
+                                try {
+                                    val artSource = resolveArtStreamSource(song)
+                                    call.response.header(HttpHeaders.ContentType, artSource.contentType.toString())
+                                    if (artSource.contentLength != null && artSource.contentLength > 0L) {
+                                        call.response.header(HttpHeaders.ContentLength, artSource.contentLength.toString())
+                                    }
+                                    artSource.lastModifiedEpochMs?.let { lastModified ->
+                                        call.response.header(HttpHeaders.LastModified, formatHttpDate(lastModified))
+                                    }
+                                    Timber.tag(castHttpLogTag).d(
+                                        "HEAD /art songId=%s source=%s length=%s type=%s",
+                                        song.id,
+                                        artSource.sourceLabel,
+                                        artSource.contentLength,
+                                        artSource.contentType
+                                    )
+                                    call.respond(HttpStatusCode.OK)
+                                } catch (e: Exception) {
+                                    if (e.isClientAbortDuringResponse()) {
+                                        Timber.tag(castHttpLogTag).d("HEAD /art client disconnected. songId=%s", song.id)
+                                        Log.w("PX_CAST_HTTP", "HEAD /art client_closed songId=${song.id} error=${e.javaClass.simpleName}")
+                                        return@head
+                                    }
+                                    Timber.tag(castHttpLogTag).e(e, "HEAD /art exception. songId=%s", song.id)
+                                    Log.e("PX_CAST_HTTP", "HEAD /art exception songId=${song.id}", e)
+                                    val fallbackSource = placeholderArtSource()
+                                    call.response.header(HttpHeaders.ContentType, fallbackSource.contentType.toString())
+                                    fallbackSource.contentLength?.let { length ->
+                                        call.response.header(HttpHeaders.ContentLength, length.toString())
+                                    }
+                                    fallbackSource.lastModifiedEpochMs?.let { lastModified ->
+                                        call.response.header(HttpHeaders.LastModified, formatHttpDate(lastModified))
+                                    }
+                                    call.respond(HttpStatusCode.OK)
+                                }
                             }
                         }
                     }.start(wait = false)
@@ -269,6 +463,545 @@ class MediaFileHttpServerService : Service() {
             hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
 
+    private fun resolveAudioStreamSource(song: Song, uri: Uri): AudioStreamSource? {
+        val fallbackFile = song.path
+            .takeIf { it.isNotBlank() }
+            ?.let(::File)
+            ?.takeIf { it.exists() && it.isFile && it.canRead() }
+        val sizeFromProvider = queryContentLengthFromProvider(uri)
+        val songLastModified = resolveSongLastModifiedEpochMs(song, fallbackFile)
+
+        var hasAssetDescriptor = false
+        var assetDescriptorSize = -1L
+        runCatching {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                hasAssetDescriptor = true
+                assetDescriptorSize = afd.length
+                    .takeIf { it > 0L }
+                    ?: afd.declaredLength.takeIf { it > 0L }
+                    ?: -1L
+            }
+        }.onFailure { throwable ->
+            Timber.tag(castHttpLogTag).d(throwable, "openAssetFileDescriptor failed. songId=%s", song.id)
+        }
+        if (hasAssetDescriptor) {
+            val resolvedSize = when {
+                assetDescriptorSize > 0L -> assetDescriptorSize
+                sizeFromProvider > 0L -> sizeFromProvider
+                fallbackFile != null -> fallbackFile.length()
+                else -> -1L
+            }
+            return AudioStreamSource(
+                sourceLabel = "asset_fd",
+                fileSize = resolvedSize,
+                lastModifiedEpochMs = songLastModified
+            ) {
+                contentResolver.openAssetFileDescriptor(uri, "r")?.createInputStream()
+                    ?: throw IllegalStateException("AssetFileDescriptor unavailable for uri=$uri songId=${song.id}")
+            }
+        }
+
+        var hasFileDescriptor = false
+        var fdSize = -1L
+        runCatching {
+            contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                hasFileDescriptor = true
+                fdSize = pfd.statSize.takeIf { it > 0L } ?: -1L
+            }
+        }.onFailure { throwable ->
+            Timber.tag(castHttpLogTag).d(throwable, "openFileDescriptor failed. songId=%s", song.id)
+        }
+        if (hasFileDescriptor) {
+            val resolvedSize = when {
+                fdSize > 0L -> fdSize
+                sizeFromProvider > 0L -> sizeFromProvider
+                fallbackFile != null -> fallbackFile.length()
+                else -> -1L
+            }
+            return AudioStreamSource(
+                sourceLabel = "parcel_fd",
+                fileSize = resolvedSize,
+                lastModifiedEpochMs = songLastModified
+            ) {
+                val pfd = contentResolver.openFileDescriptor(uri, "r")
+                    ?: throw IllegalStateException("ParcelFileDescriptor unavailable for uri=$uri songId=${song.id}")
+                ParcelFileDescriptor.AutoCloseInputStream(pfd)
+            }
+        }
+
+        val hasInputStream = runCatching {
+            contentResolver.openInputStream(uri)?.use { true } ?: false
+        }.onFailure { throwable ->
+            Timber.tag(castHttpLogTag).d(throwable, "openInputStream probe failed. songId=%s", song.id)
+        }.getOrDefault(false)
+        if (hasInputStream) {
+            return AudioStreamSource(
+                sourceLabel = "content_stream",
+                fileSize = when {
+                    sizeFromProvider > 0L -> sizeFromProvider
+                    fallbackFile != null -> fallbackFile.length()
+                    else -> -1L
+                },
+                lastModifiedEpochMs = songLastModified
+            ) {
+                contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("InputStream unavailable for uri=$uri songId=${song.id}")
+            }
+        }
+
+        if (fallbackFile != null) {
+            return AudioStreamSource(
+                sourceLabel = "file_path",
+                fileSize = fallbackFile.length(),
+                lastModifiedEpochMs = resolveSongLastModifiedEpochMs(song, fallbackFile)
+            ) {
+                FileInputStream(fallbackFile)
+            }
+        }
+        return null
+    }
+
+    private suspend fun resolveSongForServing(songId: String): Song? {
+        val repositorySong = musicRepository.getSong(songId).firstOrNull()
+        if (repositorySong != null) {
+            return repositorySong
+        }
+
+        val id = songId.toLongOrNull() ?: return null
+        Timber.tag(castHttpLogTag).w(
+            "Song not found in repository. Falling back to MediaStore query for songId=%s",
+            songId
+        )
+        Log.w("PX_CAST_HTTP", "song_resolver repo_miss songId=$songId")
+
+        val projection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ARTIST_ID,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DATA,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.MIME_TYPE,
+            MediaStore.Audio.Media.ALBUM_ARTIST,
+            MediaStore.Audio.Media.TRACK,
+            MediaStore.Audio.Media.YEAR,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DATE_MODIFIED
+        )
+
+        val selection = "${MediaStore.Audio.Media._ID} = ?"
+        val selectionArgs = arrayOf(id.toString())
+
+        return runCatching {
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                null
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    return@use null
+                }
+
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val artistIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST_ID)
+                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val mimeTypeCol = cursor.getColumnIndex(MediaStore.Audio.Media.MIME_TYPE)
+                val albumArtistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ARTIST)
+                val trackCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
+                val yearCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
+                val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+
+                val songIdLong = cursor.getLong(idCol)
+                val albumId = cursor.getLong(albumIdCol)
+                val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songIdLong)
+                val albumArtUri = if (albumId > 0) {
+                    ContentUris.withAppendedId("content://media/external/audio/albumart".toUri(), albumId).toString()
+                } else {
+                    null
+                }
+
+                Song(
+                    id = songIdLong.toString(),
+                    title = cursor.getString(titleCol).orEmpty(),
+                    artist = cursor.getString(artistCol).orEmpty(),
+                    artistId = cursor.getLong(artistIdCol),
+                    album = cursor.getString(albumCol).orEmpty(),
+                    albumId = albumId,
+                    albumArtist = if (albumArtistCol >= 0) cursor.getString(albumArtistCol) else null,
+                    path = cursor.getString(dataCol).orEmpty(),
+                    contentUriString = contentUri.toString(),
+                    albumArtUriString = albumArtUri,
+                    duration = cursor.getLong(durationCol),
+                    trackNumber = cursor.getInt(trackCol),
+                    year = cursor.getInt(yearCol),
+                    dateAdded = cursor.getLong(dateAddedCol),
+                    dateModified = cursor.getLong(dateModifiedCol),
+                    mimeType = if (mimeTypeCol >= 0) cursor.getString(mimeTypeCol) else null,
+                    bitrate = null,
+                    sampleRate = null
+                )
+            }
+        }.onSuccess { resolved ->
+            if (resolved != null) {
+                Log.i(
+                    "PX_CAST_HTTP",
+                    "song_resolver media_store_hit songId=$songId mime=${resolved.mimeType} path=${resolved.path}"
+                )
+            } else {
+                Log.e("PX_CAST_HTTP", "song_resolver media_store_miss songId=$songId")
+            }
+        }.onFailure { throwable ->
+            Timber.tag(castHttpLogTag).e(throwable, "MediaStore fallback failed for songId=%s", songId)
+            Log.e("PX_CAST_HTTP", "song_resolver media_store_error songId=$songId", throwable)
+        }.getOrNull()
+    }
+
+    private fun resolveArtStreamSource(song: Song): ArtStreamSource {
+        val albumArtUri = song.albumArtUriString
+            ?.takeIf { it.isNotBlank() }
+            ?.toUri()
+
+        if (albumArtUri != null) {
+            val uriMimeType = runCatching { contentResolver.getType(albumArtUri) }.getOrNull()
+            val contentType = resolveImageContentType(
+                mimeType = uriMimeType,
+                uriPath = albumArtUri.path
+            )
+            val contentLength = runCatching {
+                contentResolver.openAssetFileDescriptor(albumArtUri, "r")?.use { afd ->
+                    afd.length.takeIf { it > 0L } ?: afd.declaredLength.takeIf { it > 0L }
+                }
+            }.getOrNull()
+            val canOpenStream = runCatching {
+                contentResolver.openInputStream(albumArtUri)?.use { true } ?: false
+            }.onFailure { throwable ->
+                Timber.tag(castHttpLogTag).d(throwable, "Album art URI probe failed. songId=%s", song.id)
+            }.getOrDefault(false)
+
+            if (canOpenStream) {
+                return ArtStreamSource(
+                    sourceLabel = "album_art_uri",
+                    contentType = contentType,
+                    contentLength = contentLength,
+                    lastModifiedEpochMs = resolveSongLastModifiedEpochMs(song, null)
+                ) {
+                    contentResolver.openInputStream(albumArtUri)
+                        ?: throw IllegalStateException("Unable to open albumArt uri=$albumArtUri songId=${song.id}")
+                }
+            }
+        }
+
+        val embeddedArt = extractEmbeddedAlbumArt(song)
+        if (embeddedArt != null && embeddedArt.isNotEmpty()) {
+            return ArtStreamSource(
+                sourceLabel = "embedded_picture",
+                contentType = resolveEmbeddedImageContentType(embeddedArt),
+                contentLength = embeddedArt.size.toLong(),
+                lastModifiedEpochMs = resolveSongLastModifiedEpochMs(song, null)
+            ) {
+                ByteArrayInputStream(embeddedArt)
+            }
+        }
+
+        return placeholderArtSource()
+    }
+
+    private fun extractEmbeddedAlbumArt(song: Song): ByteArray? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            val uri = song.contentUriString.toUri()
+            val sourceConfigured = runCatching {
+                retriever.setDataSource(this, uri)
+                true
+            }.getOrElse {
+                val path = song.path.takeIf { value -> value.isNotBlank() } ?: return null
+                runCatching {
+                    retriever.setDataSource(path)
+                    true
+                }.getOrDefault(false)
+            }
+            if (!sourceConfigured) {
+                null
+            } else {
+                retriever.embeddedPicture
+            }
+        } catch (e: Exception) {
+            Timber.tag(castHttpLogTag).d(e, "Embedded album art extraction failed. songId=%s", song.id)
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun resolveEmbeddedImageContentType(bytes: ByteArray): ContentType {
+        return when {
+            bytes.size >= 3 &&
+                bytes[0] == 0xFF.toByte() &&
+                bytes[1] == 0xD8.toByte() &&
+                bytes[2] == 0xFF.toByte() -> ContentType.Image.JPEG
+
+            bytes.size >= 8 &&
+                bytes[0] == 0x89.toByte() &&
+                bytes[1] == 0x50.toByte() &&
+                bytes[2] == 0x4E.toByte() &&
+                bytes[3] == 0x47.toByte() -> ContentType.Image.PNG
+
+            bytes.size >= 6 &&
+                bytes[0] == 0x47.toByte() &&
+                bytes[1] == 0x49.toByte() &&
+                bytes[2] == 0x46.toByte() -> ContentType.Image.GIF
+
+            else -> ContentType.Image.JPEG
+        }
+    }
+
+    private fun placeholderArtSource(): ArtStreamSource {
+        return ArtStreamSource(
+            sourceLabel = "placeholder_png",
+            contentType = ContentType.Image.PNG,
+            contentLength = transparentPng1x1.size.toLong(),
+            lastModifiedEpochMs = null
+        ) {
+            ByteArrayInputStream(transparentPng1x1)
+        }
+    }
+
+    private fun queryContentLengthFromProvider(uri: Uri): Long {
+        return runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                val sizeColumnIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeColumnIndex == -1 || !cursor.moveToFirst()) {
+                    return@use -1L
+                }
+                cursor.getLong(sizeColumnIndex)
+            } ?: -1L
+        }.getOrDefault(-1L)
+    }
+
+    private fun resolveSongLastModifiedEpochMs(song: Song, fallbackFile: File?): Long? {
+        val fileTimestamp = fallbackFile?.lastModified()?.takeIf { it > 0L }
+        val songTimestamp = normalizeEpochMillis(song.dateModified)
+            ?: normalizeEpochMillis(song.dateAdded)
+        return fileTimestamp ?: songTimestamp
+    }
+
+    private fun normalizeEpochMillis(value: Long): Long? {
+        if (value <= 0L) return null
+        return if (value < 10_000_000_000L) value * 1000L else value
+    }
+
+    private fun formatHttpDate(epochMs: Long): String {
+        return httpDateFormatter.format(Instant.ofEpochMilli(epochMs))
+    }
+
+    private fun resolvePreferredAudioMimeType(song: Song, uri: Uri): String? {
+        val signatureMimeType = detectAudioMimeTypeBySignature(song, uri)
+        val providerMimeType = runCatching { contentResolver.getType(uri) }.getOrNull()
+        val fallbackMimeType = song.mimeType ?: providerMimeType ?: resolveAudioMimeTypeFromPath(song.path)
+        val normalizedFallback = listOfNotNull(song.mimeType, providerMimeType, resolveAudioMimeTypeFromPath(song.path))
+            .firstNotNullOfOrNull { normalizeCastAudioMimeType(it) }
+        if (signatureMimeType != null && signatureMimeType != normalizedFallback) {
+            Log.w(
+                "PX_CAST_HTTP",
+                "MIME mismatch songId=${song.id} fallback=$normalizedFallback signature=$signatureMimeType"
+            )
+        }
+        return signatureMimeType ?: normalizedFallback ?: fallbackMimeType
+    }
+
+    private fun normalizeCastAudioMimeType(rawMimeType: String): String? {
+        val normalized = rawMimeType
+            .trim()
+            .substringBefore(';')
+            .lowercase(Locale.ROOT)
+        return when (normalized) {
+            "audio/mpeg",
+            "audio/mp3",
+            "audio/mpeg3",
+            "audio/x-mpeg" -> "audio/mpeg"
+
+            "audio/flac",
+            "audio/x-flac" -> "audio/flac"
+
+            "audio/aac",
+            "audio/aacp",
+            "audio/adts",
+            "audio/vnd.dlna.adts",
+            "audio/mp4a-latm",
+            "audio/aac-latm",
+            "audio/x-aac",
+            "audio/x-hx-aac-adts" -> "audio/aac"
+
+            "audio/mp4",
+            "audio/x-m4a",
+            "audio/m4a",
+            "audio/3gpp",
+            "audio/3gp" -> "audio/mp4"
+
+            "audio/wav",
+            "audio/x-wav",
+            "audio/wave" -> "audio/wav"
+
+            "audio/ogg",
+            "audio/oga",
+            "audio/opus",
+            "application/ogg" -> "audio/ogg"
+
+            "audio/webm" -> "audio/webm"
+
+            "audio/amr",
+            "audio/amr-wb",
+            "audio/l16",
+            "audio/l24" -> normalized
+
+            else -> null
+        }
+    }
+
+    private fun detectAudioMimeTypeBySignature(song: Song, uri: Uri): String? {
+        signatureMimeCache[song.id]?.let { return it }
+        val bytes = readAudioSignature(song = song, uri = uri) ?: run {
+            signatureMimeCache[song.id] = null
+            return null
+        }
+
+        val id3PayloadOffset = parseId3PayloadOffset(bytes)
+        val detected = detectMimeAtOffset(bytes, id3PayloadOffset)
+            ?: detectMimeAtOffset(bytes, 0)
+            ?: detectFramedAudioMime(bytes, id3PayloadOffset)
+            ?: detectFramedAudioMime(bytes, 0)
+        signatureMimeCache[song.id] = detected
+        return detected
+    }
+
+    private fun readAudioSignature(song: Song, uri: Uri, maxBytes: Int = 16 * 1024): ByteArray? {
+        val uriBytes = runCatching {
+            contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(maxBytes)
+                val read = input.read(buffer)
+                if (read <= 0) null else buffer.copyOf(read)
+            }
+        }.getOrNull()
+        if (uriBytes != null && uriBytes.isNotEmpty()) {
+            return uriBytes
+        }
+
+        val file = song.path
+            .takeIf { it.isNotBlank() }
+            ?.let(::File)
+            ?.takeIf { it.exists() && it.isFile && it.canRead() }
+            ?: return null
+
+        return runCatching {
+            FileInputStream(file).use { input ->
+                val buffer = ByteArray(maxBytes)
+                val read = input.read(buffer)
+                if (read <= 0) null else buffer.copyOf(read)
+            }
+        }.getOrNull()
+    }
+
+    private fun parseId3PayloadOffset(bytes: ByteArray): Int {
+        if (bytes.size < 10) return 0
+        if (bytes[0] != 'I'.code.toByte() || bytes[1] != 'D'.code.toByte() || bytes[2] != '3'.code.toByte()) {
+            return 0
+        }
+        val flags = bytes[5].toInt() and 0xFF
+        val hasFooter = (flags and 0x10) != 0
+        val tagSize = ((bytes[6].toInt() and 0x7F) shl 21) or
+            ((bytes[7].toInt() and 0x7F) shl 14) or
+            ((bytes[8].toInt() and 0x7F) shl 7) or
+            (bytes[9].toInt() and 0x7F)
+        val totalTagBytes = 10 + tagSize + if (hasFooter) 10 else 0
+        return totalTagBytes.coerceIn(0, bytes.size)
+    }
+
+    private fun detectMimeAtOffset(bytes: ByteArray, offset: Int): String? {
+        if (offset < 0 || offset >= bytes.size) return null
+        val remaining = bytes.size - offset
+        if (remaining >= 4 &&
+            bytes[offset] == 'f'.code.toByte() &&
+            bytes[offset + 1] == 'L'.code.toByte() &&
+            bytes[offset + 2] == 'a'.code.toByte() &&
+            bytes[offset + 3] == 'C'.code.toByte()
+        ) {
+            return "audio/flac"
+        }
+        if (remaining >= 4 &&
+            bytes[offset] == 'O'.code.toByte() &&
+            bytes[offset + 1] == 'g'.code.toByte() &&
+            bytes[offset + 2] == 'g'.code.toByte() &&
+            bytes[offset + 3] == 'S'.code.toByte()
+        ) {
+            return "audio/ogg"
+        }
+        if (remaining >= 12 &&
+            bytes[offset] == 'R'.code.toByte() &&
+            bytes[offset + 1] == 'I'.code.toByte() &&
+            bytes[offset + 2] == 'F'.code.toByte() &&
+            bytes[offset + 3] == 'F'.code.toByte() &&
+            bytes[offset + 8] == 'W'.code.toByte() &&
+            bytes[offset + 9] == 'A'.code.toByte() &&
+            bytes[offset + 10] == 'V'.code.toByte() &&
+            bytes[offset + 11] == 'E'.code.toByte()
+        ) {
+            return "audio/wav"
+        }
+        if (remaining >= 12 &&
+            bytes[offset] == 'F'.code.toByte() &&
+            bytes[offset + 1] == 'O'.code.toByte() &&
+            bytes[offset + 2] == 'R'.code.toByte() &&
+            bytes[offset + 3] == 'M'.code.toByte() &&
+            bytes[offset + 8] == 'A'.code.toByte() &&
+            bytes[offset + 9] == 'I'.code.toByte() &&
+            bytes[offset + 10] == 'F'.code.toByte() &&
+            bytes[offset + 11] == 'F'.code.toByte()
+        ) {
+            return "audio/aiff"
+        }
+        if (remaining >= 12 &&
+            bytes[offset + 4] == 'f'.code.toByte() &&
+            bytes[offset + 5] == 't'.code.toByte() &&
+            bytes[offset + 6] == 'y'.code.toByte() &&
+            bytes[offset + 7] == 'p'.code.toByte()
+        ) {
+            return "audio/mp4"
+        }
+        if (remaining >= 4 &&
+            bytes[offset] == 'A'.code.toByte() &&
+            bytes[offset + 1] == 'D'.code.toByte() &&
+            bytes[offset + 2] == 'I'.code.toByte() &&
+            bytes[offset + 3] == 'F'.code.toByte()
+        ) {
+            return "audio/aac"
+        }
+        return null
+    }
+
+    private fun detectFramedAudioMime(bytes: ByteArray, startOffset: Int): String? {
+        if (bytes.size < 2) return null
+        val start = startOffset.coerceIn(0, bytes.lastIndex)
+        for (index in start until bytes.size - 1) {
+            val b0 = bytes[index].toInt() and 0xFF
+            val b1 = bytes[index + 1].toInt() and 0xFF
+            if (b0 != 0xFF || (b1 and 0xF0) != 0xF0) continue
+            val layerBits = (b1 ushr 1) and 0x03
+            if (layerBits == 0) return "audio/aac"
+            if (layerBits in 1..3) return "audio/mpeg"
+        }
+        return null
+    }
+
     private fun resolveAudioContentType(mimeType: String?): ContentType {
         val normalized = mimeType
             ?.trim()
@@ -278,6 +1011,130 @@ class MediaFileHttpServerService : Service() {
 
         return runCatching { ContentType.parse(normalized) }
             .getOrElse { ContentType.Audio.MPEG }
+    }
+
+    private fun resolveAudioMimeTypeFromPath(path: String?): String? {
+        val extension = path
+            ?.substringAfterLast('.', "")
+            ?.lowercase(Locale.ROOT)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+
+        return when (extension) {
+            "mp3" -> "audio/mpeg"
+            "flac" -> "audio/flac"
+            "aac" -> "audio/aac"
+            "m4a", "m4b", "m4p", "mp4", "3gp", "3gpp", "3ga" -> "audio/mp4"
+            "wav" -> "audio/wav"
+            "aif", "aiff", "aifc" -> "audio/aiff"
+            "ogg", "oga", "opus" -> "audio/ogg"
+            "weba" -> "audio/webm"
+            "wma" -> "audio/x-ms-wma"
+            else -> null
+        }
+    }
+
+    private fun resolveImageContentType(mimeType: String?, uriPath: String?): ContentType {
+        val normalizedMime = mimeType
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.lowercase(Locale.ROOT)
+        if (!normalizedMime.isNullOrBlank()) {
+            return runCatching { ContentType.parse(normalizedMime) }
+                .getOrElse { ContentType.Image.JPEG }
+        }
+
+        val extension = uriPath
+            ?.substringAfterLast('.', "")
+            ?.lowercase(Locale.ROOT)
+            ?.takeIf { it.isNotBlank() }
+        return when (extension) {
+            "jpg", "jpeg" -> ContentType.Image.JPEG
+            "png" -> ContentType.Image.PNG
+            "webp" -> runCatching { ContentType.parse("image/webp") }.getOrElse { ContentType.Image.JPEG }
+            "gif" -> ContentType.Image.GIF
+            "bmp" -> runCatching { ContentType.parse("image/bmp") }.getOrElse { ContentType.Image.JPEG }
+            "heic", "heif" -> runCatching { ContentType.parse("image/heif") }.getOrElse { ContentType.Image.JPEG }
+            else -> ContentType.Image.JPEG
+        }
+    }
+
+    private suspend fun ApplicationCall.respondWithAudioStream(
+        contentType: ContentType,
+        fileSize: Long,
+        rangeHeader: String?,
+        inputStreamFactory: () -> InputStream
+    ) {
+        if (rangeHeader != null && fileSize > 0) {
+            val rangesSpecifier = io.ktor.http.parseRangesSpecifier(rangeHeader)
+            val ranges = rangesSpecifier?.ranges
+
+            if (ranges.isNullOrEmpty()) {
+                Timber.tag(castHttpLogTag).w("Invalid range header: %s", rangeHeader)
+                Log.w("PX_CAST_HTTP", "Invalid range header: $rangeHeader")
+                respond(HttpStatusCode.BadRequest, "Invalid range")
+                return
+            }
+
+            val range = ranges.first()
+            val start = when (range) {
+                is io.ktor.http.ContentRange.Bounded -> range.from
+                is io.ktor.http.ContentRange.TailFrom -> range.from
+                is io.ktor.http.ContentRange.Suffix -> fileSize - range.lastCount
+                else -> 0L
+            }
+            val end = when (range) {
+                is io.ktor.http.ContentRange.Bounded -> range.to
+                is io.ktor.http.ContentRange.TailFrom -> fileSize - 1
+                is io.ktor.http.ContentRange.Suffix -> fileSize - 1
+                else -> fileSize - 1
+            }
+
+            val clampedStart = start.coerceAtLeast(0L)
+            val clampedEnd = end.coerceAtMost(fileSize - 1)
+            val length = clampedEnd - clampedStart + 1
+
+            if (length <= 0) {
+                Timber.tag(castHttpLogTag).w(
+                    "Unsatisfiable range. header=%s start=%d end=%d size=%d",
+                    rangeHeader,
+                    clampedStart,
+                    clampedEnd,
+                    fileSize
+                )
+                Log.w(
+                    "PX_CAST_HTTP",
+                    "Unsatisfiable range header=$rangeHeader start=$clampedStart end=$clampedEnd size=$fileSize"
+                )
+                respond(HttpStatusCode.RequestedRangeNotSatisfiable, "Range not satisfiable")
+                return
+            }
+
+            response.header(HttpHeaders.ContentRange, "bytes $clampedStart-$clampedEnd/$fileSize")
+            response.header(HttpHeaders.AcceptRanges, "bytes")
+            response.header(HttpHeaders.ContentLength, length.toString())
+
+            respondOutputStream(contentType, HttpStatusCode.PartialContent) {
+                inputStreamFactory().use { inputStream ->
+                    if (!skipFully(inputStream, clampedStart)) {
+                        return@use
+                    }
+                    copyLimited(inputStream, this, length)
+                }
+            }
+            return
+        }
+
+        if (fileSize > 0) {
+            response.header(HttpHeaders.AcceptRanges, "bytes")
+            response.header(HttpHeaders.ContentLength, fileSize.toString())
+        }
+
+        respondOutputStream(contentType) {
+            inputStreamFactory().use { inputStream ->
+                inputStream.copyTo(this)
+            }
+        }
     }
 
     private fun skipFully(inputStream: InputStream, bytesToSkip: Long): Boolean {
@@ -304,6 +1161,19 @@ class MediaFileHttpServerService : Service() {
             if (read == -1) break
             outputStream.write(buffer, 0, read)
             remaining -= read.toLong()
+        }
+    }
+
+    private fun Throwable.isClientAbortDuringResponse(): Boolean {
+        return generateSequence(this) { it.cause }.any { cause ->
+            cause is ClosedChannelException ||
+                cause is EOFException ||
+                (cause is SocketException && (
+                    cause.message?.contains("Connection reset", ignoreCase = true) == true ||
+                        cause.message?.contains("Broken pipe", ignoreCase = true) == true ||
+                        cause.message?.contains("Socket closed", ignoreCase = true) == true
+                    )) ||
+                cause.javaClass.name.contains("ChannelWriteException")
         }
     }
 

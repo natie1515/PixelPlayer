@@ -38,6 +38,10 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
  * - queue state/controller derivation moved to rememberQueueSheetState
  * - mini dismiss handler creation moved to rememberMiniPlayerDismissGestureHandler
  * - drag/back state derivation moved to rememberSheetBackAndDragState
+ * - cast sheet state moved to rememberCastSheetState
+ * - prewarm full-player state moved to rememberPrewarmFullPlayer
+ * - artist navigation side-effect moved to PlayerArtistNavigationEffect
+ * - full-player visual derivation moved to rememberFullPlayerVisualState
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable

@@ -50,7 +50,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,11 +88,15 @@ import androidx.navigation.NavHostController
 import coil.size.Size
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.presentation.components.scoped.PlayerArtistNavigationEffect
 import com.theveloper.pixelplay.presentation.components.scoped.PlayerSheetPredictiveBackHandler
 import com.theveloper.pixelplay.presentation.components.scoped.QueueSheetRuntimeEffects
 import com.theveloper.pixelplay.presentation.components.scoped.miniPlayerDismissHorizontalGesture
 import com.theveloper.pixelplay.presentation.components.scoped.playerSheetVerticalDragGesture
+import com.theveloper.pixelplay.presentation.components.scoped.rememberCastSheetState
+import com.theveloper.pixelplay.presentation.components.scoped.rememberFullPlayerVisualState
 import com.theveloper.pixelplay.presentation.components.scoped.rememberMiniPlayerDismissGestureHandler
+import com.theveloper.pixelplay.presentation.components.scoped.rememberPrewarmFullPlayer
 import com.theveloper.pixelplay.presentation.components.scoped.rememberQueueSheetState
 import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetBackAndDragState
 import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetInteractionState
@@ -108,8 +111,6 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import kotlinx.collections.immutable.persistentListOf
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -195,7 +196,7 @@ fun UnifiedPlayerSheet(
 
     val currentSheetContentState by playerViewModel.sheetState.collectAsState()
     val predictiveBackCollapseProgress by playerViewModel.predictiveBackCollapseFraction.collectAsState()
-    var prewarmFullPlayer by remember { mutableStateOf(false) }
+    val prewarmFullPlayer = rememberPrewarmFullPlayer(infrequentPlayerState.currentSong?.id)
 
     val navBarCornerRadius by playerViewModel.navBarCornerRadius.collectAsState()
     val navBarStyle by playerViewModel.navBarStyle.collectAsState()
@@ -204,18 +205,6 @@ fun UnifiedPlayerSheet(
     val tapBackgroundClosesPlayer by playerViewModel.tapBackgroundClosesPlayer.collectAsState()
     val useSmoothCorners by playerViewModel.useSmoothCorners.collectAsState()
     val playerThemePreference by playerViewModel.playerThemePreference.collectAsState()
-
-    LaunchedEffect(infrequentPlayerState.currentSong?.id) {
-        if (infrequentPlayerState.currentSong != null) {
-            prewarmFullPlayer = true
-        }
-    }
-    LaunchedEffect(infrequentPlayerState.currentSong?.id, prewarmFullPlayer) {
-        if (prewarmFullPlayer) {
-            delay(32)
-            prewarmFullPlayer = false
-        }
-    }
 
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
@@ -277,31 +266,19 @@ fun UnifiedPlayerSheet(
         )
     }
 
-    LaunchedEffect(
-        navController,
-        sheetCollapsedTargetY
-    ) {
-        playerViewModel.artistNavigationRequests.collectLatest { artistId ->
-            sheetMotionController.snapCollapsed(sheetCollapsedTargetY)
-            playerViewModel.collapsePlayerSheet()
+    PlayerArtistNavigationEffect(
+        navController = navController,
+        sheetCollapsedTargetY = sheetCollapsedTargetY,
+        sheetMotionController = sheetMotionController,
+        playerViewModel = playerViewModel
+    )
 
-            navController.navigate(Screen.ArtistDetail.createRoute(artistId)) {
-                launchSingleTop = true
-            }
-        }
-    }
-
-    val fullPlayerContentAlpha by remember {
-        derivedStateOf {
-            (playerContentExpansionFraction.value - 0.25f).coerceIn(0f, 0.75f) / 0.75f
-        }
-    }
-
-    val fullPlayerTranslationY by remember {
-        derivedStateOf {
-            lerp(initialFullPlayerOffsetY, 0f, fullPlayerContentAlpha)
-        }
-    }
+    val fullPlayerVisualState = rememberFullPlayerVisualState(
+        expansionFraction = playerContentExpansionFraction.value,
+        initialOffsetY = initialFullPlayerOffsetY
+    )
+    val fullPlayerContentAlpha = fullPlayerVisualState.contentAlpha
+    val fullPlayerTranslationY = fullPlayerVisualState.translationY
 
     suspend fun animatePlayerSheet(
         targetExpanded: Boolean,
@@ -403,8 +380,7 @@ fun UnifiedPlayerSheet(
     val queueSheetController = queueSheetState.queueSheetController
     val onQueueSheetHeightPxChange = queueSheetState.onQueueSheetHeightPxChange
 
-    var showCastSheet by remember { mutableStateOf(false) }
-    var castSheetOpenFraction by remember { mutableFloatStateOf(0f) }
+    val castSheetState = rememberCastSheetState()
     val sheetBackAndDragState = rememberSheetBackAndDragState(
         showPlayerContentArea = showPlayerContentArea,
         currentSheetContentState = currentSheetContentState
@@ -460,7 +436,7 @@ fun UnifiedPlayerSheet(
         queueHiddenOffsetPx = queueHiddenOffsetPx,
         queueSheetOffset = queueSheetOffset,
         screenHeightPx = screenHeightPx,
-        castSheetOpenFraction = castSheetOpenFraction
+        castSheetOpenFraction = castSheetState.castSheetOpenFraction
     )
     val internalIsKeyboardVisible = sheetOverlayState.internalIsKeyboardVisible
     val actuallyShowSheetContent = sheetOverlayState.actuallyShowSheetContent
@@ -613,7 +589,7 @@ fun UnifiedPlayerSheet(
                                 onQueueRelease = { totalDrag, velocity ->
                                     queueSheetController.endDrag(totalDrag, velocity)
                                 },
-                                onShowCastClicked = { showCastSheet = true }
+                                onShowCastClicked = castSheetState.openCastSheet
                             )
                         }
                     }
@@ -707,15 +683,12 @@ fun UnifiedPlayerSheet(
         }
 
         UnifiedPlayerCastLayer(
-            showCastSheet = showCastSheet,
+            showCastSheet = castSheetState.showCastSheet,
             internalIsKeyboardVisible = internalIsKeyboardVisible,
             albumColorScheme = albumColorScheme,
             playerViewModel = playerViewModel,
-            onDismiss = {
-                castSheetOpenFraction = 0f
-                showCastSheet = false
-            },
-            onExpansionChanged = { fraction -> castSheetOpenFraction = fraction }
+            onDismiss = castSheetState.dismissCastSheet,
+            onExpansionChanged = castSheetState.onCastExpansionChanged
         )
 
         UnifiedPlayerSaveQueueLayer(

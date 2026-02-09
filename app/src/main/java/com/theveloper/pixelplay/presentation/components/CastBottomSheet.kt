@@ -315,7 +315,10 @@ fun CastBottomSheet(
                 onSelectDevice = { id ->
                     routes.firstOrNull { it.id == id }?.let { playerViewModel.selectRoute(it) }
                 },
-                onDisconnect = { playerViewModel.disconnect() },
+                onDisconnect = {
+                    playerViewModel.disconnect()
+                    onDismiss()
+                },
                 onVolumeChange = { value ->
                     if (uiState.activeDevice.isRemote) {
                         playerViewModel.setRouteVolume(value.toInt())
@@ -1105,6 +1108,7 @@ private fun ActiveDeviceHero(
                     if (device.isRemote) {
                         Button(
                             onClick = onDisconnect,
+                            enabled = !device.isConnecting,
                             shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -1284,7 +1288,15 @@ private fun CastDeviceRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(CircleShape) // Mantenemos el clip circular para el ripple
-            .clickable(enabled = !device.isBluetooth, onClick = if (device.isSelected) onDisconnect else onSelect),
+            .clickable(
+                enabled = !device.isBluetooth,
+                onClick = when {
+                    device.isSelected &&
+                        device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED -> onDisconnect
+                    device.isSelected -> ({})
+                    else -> onSelect
+                }
+            ),
         color = containerColor,
         tonalElevation = 2.dp
     ) {
