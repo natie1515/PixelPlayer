@@ -127,6 +127,11 @@ data class BottomNavItem(
     val screen: Screen
 )
 
+private data class DismissUndoBarSlice(
+    val isVisible: Boolean = false,
+    val durationMillis: Long = 4000L
+)
+
 @UnstableApi
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -571,7 +576,6 @@ class MainActivity : ComponentActivity() {
                                 .distinctUntilChanged()
                         }.collectAsState(initial = null)
                         val showPlayerContentArea = currentSongId != null
-                        val currentSheetContentState by playerViewModel.sheetState.collectAsState()
                         val navBarCornerRadius by playerViewModel.navBarCornerRadius.collectAsState()
                         val navBarElevation = 3.dp
 
@@ -688,9 +692,12 @@ class MainActivity : ComponentActivity() {
                         val screenHeightPx = remember(configuration) { with(density) { configuration.containerSize.height } }
                         val containerHeight = this.maxHeight
 
-                        val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+                        val showPlayerContentInitially by remember {
+                            playerViewModel.stablePlayerState
+                                .map { it.currentSong?.id != null }
+                                .distinctUntilChanged()
+                        }.collectAsState(initial = false)
                         val usePlayerSheetV2 by userPreferencesRepository.usePlayerSheetV2Flow.collectAsState(initial = false)
-                        val showPlayerContentInitially = stablePlayerState.currentSong != null
 
                         val routesWithHiddenMiniPlayer = remember { setOf(Screen.NavBarCrRad.route) }
                         val shouldHideMiniPlayer by remember(currentRoute) {
@@ -736,10 +743,25 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        val playerUiState by playerViewModel.playerUiState.collectAsState()
+                        val dismissUndoBarSlice by remember {
+                            playerViewModel.playerUiState
+                                .map { state ->
+                                    DismissUndoBarSlice(
+                                        isVisible = state.showDismissUndoBar,
+                                        durationMillis = state.undoBarVisibleDuration
+                                    )
+                                }
+                                .distinctUntilChanged()
+                        }.collectAsState(initial = DismissUndoBarSlice())
+                        val onUndoDismissPlaylist = remember(playerViewModel) {
+                            { playerViewModel.undoDismissPlaylist() }
+                        }
+                        val onCloseDismissUndoBar = remember(playerViewModel) {
+                            { playerViewModel.hideDismissUndoBar() }
+                        }
 
                         AnimatedVisibility(
-                            visible = playerUiState.showDismissUndoBar,
+                            visible = dismissUndoBarSlice.isVisible,
                             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
                             modifier = Modifier
@@ -752,9 +774,9 @@ class MainActivity : ComponentActivity() {
                                     .fillMaxWidth()
                                     .height(MiniPlayerHeight)
                                     .padding(horizontal = 14.dp),
-                                onUndo = { playerViewModel.undoDismissPlaylist() },
-                                onClose = { playerViewModel.hideDismissUndoBar() },
-                                durationMillis = playerUiState.undoBarVisibleDuration
+                                onUndo = onUndoDismissPlaylist,
+                                onClose = onCloseDismissUndoBar,
+                                durationMillis = dismissUndoBarSlice.durationMillis
                             )
                         }
                     }

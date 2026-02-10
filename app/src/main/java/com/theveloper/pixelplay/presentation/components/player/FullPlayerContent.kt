@@ -130,6 +130,7 @@ fun FullPlayerContent(
     currentQueueSourceName: String,
     isShuffleEnabled: Boolean,
     repeatMode: Int,
+    allowRealtimeUpdates: Boolean = true,
     expansionFractionProvider: () -> Float,
     currentSheetState: PlayerSheetState,
     carouselStyle: String,
@@ -471,6 +472,7 @@ fun FullPlayerContent(
             inactiveTrackColor = playerOnBaseColor.copy(alpha = 0.2f),
             thumbColor = playerAccentColor,
             timeTextColor = playerOnBaseColor,
+            allowRealtimeUpdates = allowRealtimeUpdates,
             loadingTweaks = loadingTweaks
         )
     }
@@ -605,7 +607,8 @@ fun FullPlayerContent(
     Scaffold(
         containerColor = Color.Transparent,
         modifier = Modifier.pointerInput(currentSheetState) {
-            val queueDragActivationThresholdPx = 6.dp.toPx()
+            val queueDragActivationThresholdPx = 4.dp.toPx()
+            val quickFlickVelocityThreshold = -520f
 
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
@@ -620,10 +623,12 @@ fun FullPlayerContent(
                 var dragConsumedByQueue = false
                 val velocityTracker = VelocityTracker()
                 var totalDrag = 0f
+                velocityTracker.addPosition(down.uptimeMillis, down.position)
 
                 drag(down.id) { change ->
                     val dragAmount = change.positionChange().y
                     totalDrag += dragAmount
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
                     val isDraggingUp = totalDrag < -queueDragActivationThresholdPx
 
                     if (isDraggingUp && !dragConsumedByQueue) {
@@ -633,13 +638,18 @@ fun FullPlayerContent(
 
                     if (dragConsumedByQueue) {
                         change.consume()
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
                         onQueueDrag(dragAmount)
                     }
                 }
 
+                val velocity = velocityTracker.calculateVelocity().y
                 if (dragConsumedByQueue) {
-                    val velocity = velocityTracker.calculateVelocity().y
+                    onQueueRelease(totalDrag, velocity)
+                } else if (
+                    totalDrag < -(queueDragActivationThresholdPx * 2f) &&
+                    velocity < quickFlickVelocityThreshold
+                ) {
+                    // Treat short/fast upward flick as queue-open intent.
                     onQueueRelease(totalDrag, velocity)
                 }
             }
@@ -1108,12 +1118,14 @@ private fun PlayerProgressBarSection(
     inactiveTrackColor: Color,
     thumbColor: Color,
     timeTextColor: Color,
+    allowRealtimeUpdates: Boolean = true,
     loadingTweaks: FullPlayerLoadingTweaks? = null,
     modifier: Modifier = Modifier
 ) {
     val expansionFraction = expansionFractionProvider()
     val isVisible = expansionFraction > 0.01f
     val isExpanded = currentSheetState == PlayerSheetState.EXPANDED && expansionFraction >= 0.995f
+    val shouldRunRealtimeUpdates = allowRealtimeUpdates && isVisible && isExpanded
 
     val reportedDuration = totalDurationValue.coerceAtLeast(0L)
     val hintDuration = songDurationHintMs.coerceAtLeast(0L)
@@ -1149,7 +1161,7 @@ private fun PlayerProgressBarSection(
         totalDuration = displayDurationValue,
         sampleWhilePlayingMs = 200L,
         sampleWhilePausedMs = 800L,
-        isVisible = isVisible
+        isVisible = shouldRunRealtimeUpdates
     )
 
     var sliderDragValue by remember { mutableStateOf<Float?>(null) }
@@ -1162,7 +1174,6 @@ private fun PlayerProgressBarSection(
         val target = optimisticPosition
         if (target != null) {
             val start = System.currentTimeMillis()
-            val targetFl = target.toFloat() / durationForCalc.toFloat()
             
             while (optimisticPosition != null) {
                 // Check if the current VISUAL progress (smoothState) corresponds to the target
@@ -1180,20 +1191,31 @@ private fun PlayerProgressBarSection(
     }
 
     val interactionSource = remember { MutableInteractionSource() }
+    val shouldAnimateWavyProgress by remember(shouldRunRealtimeUpdates, isPlayingProvider) {
+        derivedStateOf { shouldRunRealtimeUpdates && isPlayingProvider() }
+    }
 
     // Logic to determine target progress without reading values
-    val rawPositionProvider = remember(currentPositionProvider, isVisible) {
-        { if (isVisible) currentPositionProvider() else 0L }
+    val rawPositionProvider = remember(currentPositionProvider) {
+        currentPositionProvider
     }
     
     // DIRECT State derivation - No intermediate Animatable (fixes "stepping" lag)
-    val animatedProgressState = remember(isExpanded, sliderDragValue, optimisticPosition, smoothProgressState, durationForCalc, rawPositionProvider) {
+    val animatedProgressState = remember(
+        isExpanded,
+        shouldRunRealtimeUpdates,
+        sliderDragValue,
+        optimisticPosition,
+        smoothProgressState,
+        durationForCalc,
+        rawPositionProvider
+    ) {
         derivedStateOf {
              if (sliderDragValue != null) {
                  sliderDragValue!!
              } else if (optimisticPosition != null) {
                  (optimisticPosition!!.toFloat() / durationForCalc.toFloat()).coerceIn(0f, 1f)
-             } else if (isExpanded) {
+             } else if (isExpanded && shouldRunRealtimeUpdates) {
                  val rawPos = rawPositionProvider()
                  (rawPos.coerceAtLeast(0) / durationForCalc.toFloat()).coerceIn(0f, 1f)
              } else {
@@ -1243,9 +1265,6 @@ private fun PlayerProgressBarSection(
         Column(
             modifier = modifier
                 .fillMaxWidth()
-                .graphicsLayer { 
-                    // No reads here
-                }
                 .padding(vertical = lerp(2.dp, 0.dp, expansionFraction))
                 .heightIn(min = 70.dp)
         ) {
@@ -1266,7 +1285,7 @@ private fun PlayerProgressBarSection(
                 activeTrackColor = activeTrackColor,
                 inactiveTrackColor = inactiveTrackColor,
                 interactionSource = interactionSource,
-                isPlaying = isPlayingProvider()
+                isPlaying = shouldAnimateWavyProgress
             )
 
             // Isolated Time Labels

@@ -42,6 +42,7 @@ fun WavySliderExpressive(
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    interactionSource: MutableInteractionSource? = null,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
     onValueChangeFinished: (() -> Unit)? = null,
     activeTrackColor: Color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
@@ -70,9 +71,9 @@ fun WavySliderExpressive(
         else ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
 
     val clampedValue = value.coerceIn(valueRange.start, valueRange.endInclusive)
-    val interactionSource = remember { MutableInteractionSource() }
-    val isDragged by interactionSource.collectIsDraggedAsState()
-    val isPressed by interactionSource.collectIsPressedAsState()
+    val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
+    val isDragged by resolvedInteractionSource.collectIsDraggedAsState()
+    val isPressed by resolvedInteractionSource.collectIsPressedAsState()
     val isInteracting = isDragged || isPressed
 
     val thumbInteractionFraction by animateFloatAsState(
@@ -103,7 +104,7 @@ fun WavySliderExpressive(
             enabled = enabled,
             valueRange = valueRange,
             onValueChangeFinished = onValueChangeFinished,
-            interactionSource = interactionSource,
+            interactionSource = resolvedInteractionSource,
             colors = SliderDefaults.colors(
                 thumbColor = Color.Transparent,
                 activeTrackColor = Color.Transparent,

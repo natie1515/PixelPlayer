@@ -49,11 +49,19 @@ internal fun rememberQueueSheetState(
             if (queueSheetHeightPx == 0f) 0f else queueSheetHeightPx + basePadding
         }
     }
-    val queueDragThresholdPx by remember(queueHiddenOffsetPx) {
-        derivedStateOf { queueHiddenOffsetPx * 0.08f }
+    val minQueueDragThresholdPx = remember(density) { with(density) { 14.dp.toPx() } }
+    val maxQueueDragThresholdPx = remember(density) { with(density) { 56.dp.toPx() } }
+    val queueDragThresholdPx by remember(
+        queueHiddenOffsetPx,
+        minQueueDragThresholdPx,
+        maxQueueDragThresholdPx
+    ) {
+        derivedStateOf {
+            (queueHiddenOffsetPx * 0.05f).coerceIn(minQueueDragThresholdPx, maxQueueDragThresholdPx)
+        }
     }
     val queueMinFlingTravelPx by remember(density) {
-        derivedStateOf { with(density) { 18.dp.toPx() } }
+        derivedStateOf { with(density) { 12.dp.toPx() } }
     }
 
     val queueHiddenOffsetPxState = rememberUpdatedState(queueHiddenOffsetPx)

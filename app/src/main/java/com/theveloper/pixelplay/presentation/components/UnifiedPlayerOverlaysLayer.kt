@@ -239,6 +239,7 @@ internal fun UnifiedPlayerSongInfoLayer(
 @Composable
 internal fun UnifiedPlayerQueueAndSongInfoHost(
     shouldRenderHost: Boolean,
+    isQueueTelemetryActive: Boolean,
     albumColorScheme: ColorScheme,
     queueScrimAlpha: Float,
     showQueueSheet: Boolean,
@@ -250,9 +251,6 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
     currentPlaybackQueue: ImmutableList<Song>,
     currentQueueSourceName: String,
     infrequentPlayerState: StablePlayerState,
-    activeTimerValueDisplay: State<String?>,
-    playCount: State<Float>,
-    isEndOfTrackTimerActive: State<Boolean>,
     playerViewModel: PlayerViewModel,
     selectedSongForInfo: Song?,
     onSelectedSongForInfoChange: (Song?) -> Unit,
@@ -268,6 +266,27 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
 
     val latestPlaybackQueue = rememberUpdatedState(currentPlaybackQueue)
     val latestQueueSourceName = rememberUpdatedState(currentQueueSourceName)
+    val inactiveTimerValueDisplayState = rememberUpdatedState<String?>(null)
+    val inactivePlayCountState = rememberUpdatedState(0f)
+    val inactiveEndOfTrackTimerActiveState = rememberUpdatedState(false)
+    val activeTimerValueDisplay: State<String?> =
+        if (isQueueTelemetryActive) {
+            playerViewModel.activeTimerValueDisplay.collectAsState()
+        } else {
+            inactiveTimerValueDisplayState
+        }
+    val playCount: State<Float> =
+        if (isQueueTelemetryActive) {
+            playerViewModel.playCount.collectAsState()
+        } else {
+            inactivePlayCountState
+        }
+    val isEndOfTrackTimerActive: State<Boolean> =
+        if (isQueueTelemetryActive) {
+            playerViewModel.isEndOfTrackTimerActive.collectAsState()
+        } else {
+            inactiveEndOfTrackTimerActiveState
+        }
 
     CompositionLocalProvider(
         LocalMaterialTheme provides albumColorScheme

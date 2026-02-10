@@ -15,6 +15,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -30,6 +31,7 @@ import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.FullPlayerLoadingTweaks
 import com.theveloper.pixelplay.presentation.components.player.FullPlayerContent
+import com.theveloper.pixelplay.presentation.components.scoped.rememberFullPlayerRuntimePolicy
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
@@ -58,6 +60,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
     playerViewModel: PlayerViewModel,
     currentPositionProvider: () -> Long,
     isFavorite: Boolean,
+    shouldRenderFullPlayer: Boolean = true,
     onShowQueueClicked: () -> Unit,
     onQueueDragStart: () -> Unit,
     onQueueDrag: (Float) -> Unit,
@@ -95,69 +98,112 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
             }
         }
 
-        CompositionLocalProvider(
-            LocalMaterialTheme provides albumColorScheme
-        ) {
-            val fullPlayerScale by remember(bottomSheetOpenFraction) {
-                derivedStateOf { lerp(1f, 0.95f, bottomSheetOpenFraction) }
-            }
-
-            val fullPlayerZIndex by remember {
-                derivedStateOf {
-                    if (playerContentExpansionFraction.value >= 0.5f) 1f else 0f
-                }
-            }
-            val fullPlayerOffset by remember {
-                derivedStateOf {
-                    if (playerContentExpansionFraction.value <= 0.01f) IntOffset(0, 10000)
-                    else IntOffset.Zero
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .graphicsLayer {
-                        alpha = fullPlayerContentAlpha
-                        translationY = fullPlayerTranslationY
-                        scaleX = fullPlayerScale
-                        scaleY = fullPlayerScale
-                    }
-                    .zIndex(fullPlayerZIndex)
-                    .offset { fullPlayerOffset }
+        if (shouldRenderFullPlayer) {
+            CompositionLocalProvider(
+                LocalMaterialTheme provides albumColorScheme
             ) {
-                FullPlayerContent(
-                    currentSong = currentSongNonNull,
-                    currentPlaybackQueue = currentPlaybackQueue,
-                    currentQueueSourceName = currentQueueSourceName,
-                    isShuffleEnabled = infrequentPlayerState.isShuffleEnabled,
-                    repeatMode = infrequentPlayerState.repeatMode,
-                    expansionFractionProvider = { playerContentExpansionFraction.value },
+                val fullPlayerScale by remember(bottomSheetOpenFraction) {
+                    derivedStateOf { lerp(1f, 0.95f, bottomSheetOpenFraction) }
+                }
+
+                val fullPlayerZIndex by remember {
+                    derivedStateOf {
+                        if (playerContentExpansionFraction.value >= 0.5f) 1f else 0f
+                    }
+                }
+                val fullPlayerOffset by remember {
+                    derivedStateOf {
+                        if (playerContentExpansionFraction.value <= 0.01f) IntOffset(0, 10000)
+                        else IntOffset.Zero
+                    }
+                }
+                val fullPlayerRuntimePolicy = rememberFullPlayerRuntimePolicy(
                     currentSheetState = currentSheetContentState,
-                    carouselStyle = carouselStyle,
-                    loadingTweaks = fullPlayerLoadingTweaks,
-                    playerViewModel = playerViewModel,
-                    currentPositionProvider = currentPositionProvider,
-                    isPlayingProvider = { infrequentPlayerState.isPlaying },
-                    repeatModeProvider = { infrequentPlayerState.repeatMode },
-                    isShuffleEnabledProvider = { infrequentPlayerState.isShuffleEnabled },
-                    totalDurationProvider = { infrequentPlayerState.totalDuration },
-                    lyricsProvider = { infrequentPlayerState.lyrics },
-                    isCastConnecting = isCastConnecting,
-                    isFavoriteProvider = { isFavorite },
-                    onPlayPause = playerViewModel::playPause,
-                    onSeek = playerViewModel::seekTo,
-                    onNext = playerViewModel::nextSong,
-                    onPrevious = playerViewModel::previousSong,
-                    onCollapse = playerViewModel::collapsePlayerSheet,
-                    onShowQueueClicked = onShowQueueClicked,
-                    onQueueDragStart = onQueueDragStart,
-                    onQueueDrag = onQueueDrag,
-                    onQueueRelease = onQueueRelease,
-                    onShowCastClicked = onShowCastClicked,
-                    onShuffleToggle = playerViewModel::toggleShuffle,
-                    onRepeatToggle = playerViewModel::cycleRepeatMode,
-                    onFavoriteToggle = playerViewModel::toggleFavorite
+                    expansionFraction = playerContentExpansionFraction.value,
+                    fullPlayerContentAlpha = fullPlayerContentAlpha,
+                    bottomSheetOpenFraction = bottomSheetOpenFraction
                 )
+
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            alpha = fullPlayerContentAlpha
+                            translationY = fullPlayerTranslationY
+                            scaleX = fullPlayerScale
+                            scaleY = fullPlayerScale
+                        }
+                        .zIndex(fullPlayerZIndex)
+                        .offset { fullPlayerOffset }
+                ) {
+                    val latestInfrequentPlayerState = rememberUpdatedState(infrequentPlayerState)
+                    val latestIsFavorite = rememberUpdatedState(isFavorite)
+                    val expansionFractionProvider = remember(playerContentExpansionFraction) {
+                        { playerContentExpansionFraction.value }
+                    }
+                    val isPlayingProvider = remember {
+                        { latestInfrequentPlayerState.value.isPlaying }
+                    }
+                    val repeatModeProvider = remember {
+                        { latestInfrequentPlayerState.value.repeatMode }
+                    }
+                    val isShuffleEnabledProvider = remember {
+                        { latestInfrequentPlayerState.value.isShuffleEnabled }
+                    }
+                    val totalDurationProvider = remember {
+                        { latestInfrequentPlayerState.value.totalDuration }
+                    }
+                    val lyricsProvider = remember {
+                        { latestInfrequentPlayerState.value.lyrics }
+                    }
+                    val isFavoriteProvider = remember {
+                        { latestIsFavorite.value }
+                    }
+                    val onPlayPause = remember(playerViewModel) { playerViewModel::playPause }
+                    val onSeek = remember(playerViewModel) { playerViewModel::seekTo }
+                    val onNext = remember(playerViewModel) { playerViewModel::nextSong }
+                    val onPrevious = remember(playerViewModel) { playerViewModel::previousSong }
+                    val onCollapse = remember(playerViewModel) { playerViewModel::collapsePlayerSheet }
+                    val onShuffleToggle = remember(playerViewModel) {
+                        { playerViewModel.toggleShuffle() }
+                    }
+                    val onRepeatToggle = remember(playerViewModel) { playerViewModel::cycleRepeatMode }
+                    val onFavoriteToggle = remember(playerViewModel) { playerViewModel::toggleFavorite }
+
+                    FullPlayerContent(
+                        currentSong = currentSongNonNull,
+                        currentPlaybackQueue = currentPlaybackQueue,
+                        currentQueueSourceName = currentQueueSourceName,
+                        isShuffleEnabled = infrequentPlayerState.isShuffleEnabled,
+                        repeatMode = infrequentPlayerState.repeatMode,
+                        allowRealtimeUpdates = fullPlayerRuntimePolicy.allowRealtimeUpdates,
+                        expansionFractionProvider = expansionFractionProvider,
+                        currentSheetState = currentSheetContentState,
+                        carouselStyle = carouselStyle,
+                        loadingTweaks = fullPlayerLoadingTweaks,
+                        playerViewModel = playerViewModel,
+                        currentPositionProvider = currentPositionProvider,
+                        isPlayingProvider = isPlayingProvider,
+                        repeatModeProvider = repeatModeProvider,
+                        isShuffleEnabledProvider = isShuffleEnabledProvider,
+                        totalDurationProvider = totalDurationProvider,
+                        lyricsProvider = lyricsProvider,
+                        isCastConnecting = isCastConnecting,
+                        isFavoriteProvider = isFavoriteProvider,
+                        onPlayPause = onPlayPause,
+                        onSeek = onSeek,
+                        onNext = onNext,
+                        onPrevious = onPrevious,
+                        onCollapse = onCollapse,
+                        onShowQueueClicked = onShowQueueClicked,
+                        onQueueDragStart = onQueueDragStart,
+                        onQueueDrag = onQueueDrag,
+                        onQueueRelease = onQueueRelease,
+                        onShowCastClicked = onShowCastClicked,
+                        onShuffleToggle = onShuffleToggle,
+                        onRepeatToggle = onRepeatToggle,
+                        onFavoriteToggle = onFavoriteToggle
+                    )
+                }
             }
         }
     }
@@ -201,6 +247,7 @@ internal fun UnifiedPlayerPrewarmLayer(
                     currentQueueSourceName = currentQueueSourceName,
                     isShuffleEnabled = infrequentPlayerState.isShuffleEnabled,
                     repeatMode = infrequentPlayerState.repeatMode,
+                    allowRealtimeUpdates = false,
                     expansionFractionProvider = { 1f },
                     currentSheetState = PlayerSheetState.EXPANDED,
                     carouselStyle = carouselStyle,
@@ -224,7 +271,7 @@ internal fun UnifiedPlayerPrewarmLayer(
                     onPrevious = playerViewModel::previousSong,
                     onCollapse = {},
                     onShowCastClicked = {},
-                    onShuffleToggle = playerViewModel::toggleShuffle,
+                    onShuffleToggle = { playerViewModel.toggleShuffle() },
                     onRepeatToggle = playerViewModel::cycleRepeatMode,
                     onFavoriteToggle = playerViewModel::toggleFavorite
                 )

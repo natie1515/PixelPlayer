@@ -25,7 +25,10 @@ internal class QueueSheetController(
         val hiddenOffset = hiddenOffsetProvider()
         if (hiddenOffset <= 0f) return
         val targetOffset = if (showQueueSheetProvider()) {
-            queueSheetOffset.value.coerceIn(0f, hiddenOffset)
+            // If open was requested before we knew the measured height, offset can still be off-range.
+            // In that case, honor the open request by snapping to fully expanded.
+            if (queueSheetOffset.value > hiddenOffset) 0f
+            else queueSheetOffset.value.coerceIn(0f, hiddenOffset)
         } else {
             hiddenOffset
         }
@@ -89,11 +92,16 @@ internal class QueueSheetController(
         val hiddenOffset = hiddenOffsetProvider()
         if (hiddenOffset == 0f || !allowInteractionProvider()) return
 
-        val isFastUpward = velocity < -650f
-        val isFastDownward = velocity > 650f
-        val hasMeaningfulUpwardTravel = totalDrag < -minFlingTravelPxProvider()
+        val isFastUpward = velocity < -520f
+        val isFastDownward = velocity > 700f
+        val minFlingTravelPx = minFlingTravelPxProvider()
+        val hasMeaningfulUpwardTravel = totalDrag < -minFlingTravelPx
+        // Quick upward flicks on full player can be short in travel but high in intent.
+        val hasQuickUpwardTravel = totalDrag < -(minFlingTravelPx * 0.35f)
+        val shouldExpandFromQuickFling = isFastUpward && hasQuickUpwardTravel
         val dragThresholdPx = dragThresholdPxProvider()
-        val shouldExpand = (isFastUpward && hasMeaningfulUpwardTravel) ||
+        val shouldExpand = shouldExpandFromQuickFling ||
+            (isFastUpward && hasMeaningfulUpwardTravel) ||
             (!isFastDownward && (
                 queueSheetOffset.value < hiddenOffset - dragThresholdPx ||
                     totalDrag < -dragThresholdPx

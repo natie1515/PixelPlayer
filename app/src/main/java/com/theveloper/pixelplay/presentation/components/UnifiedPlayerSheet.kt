@@ -102,10 +102,10 @@ import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetBack
 import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetInteractionState
 import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetModalOverlayController
 import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetOverlayState
+import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetActionHandlers
 import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetThemeState
 import com.theveloper.pixelplay.presentation.components.scoped.rememberSheetVisualState
 import com.theveloper.pixelplay.presentation.components.scoped.SheetMotionController
-import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
@@ -124,8 +124,7 @@ const val ANIMATION_DURATION_MS = 255
 private data class PlayerUiSheetSlice(
     val currentPlaybackQueue: kotlinx.collections.immutable.ImmutableList<Song> = persistentListOf(),
     val currentQueueSourceName: String = "",
-    val preparingSongId: String? = null,
-    val showDismissUndoBar: Boolean = false
+    val preparingSongId: String? = null
 )
 
 val MiniPlayerBottomSpacer = 8.dp
@@ -172,18 +171,13 @@ fun UnifiedPlayerSheet(
     }
     
     val isFavorite by playerViewModel.isCurrentSongFavorite.collectAsState()
-    val activeTimerValueDisplayState = playerViewModel.activeTimerValueDisplay.collectAsState()
-    val playCountState = playerViewModel.playCount.collectAsState()
-    val isEndOfTrackTimerActiveState = playerViewModel.isEndOfTrackTimerActive.collectAsState()
-
     val playerUiSheetSlice by remember {
         playerViewModel.playerUiState
             .map { state ->
                 PlayerUiSheetSlice(
                     currentPlaybackQueue = state.currentPlaybackQueue,
                     currentQueueSourceName = state.currentQueueSourceName,
-                    preparingSongId = state.preparingSongId,
-                    showDismissUndoBar = state.showDismissUndoBar
+                    preparingSongId = state.preparingSongId
                 )
             }
             .distinctUntilChanged()
@@ -192,7 +186,6 @@ fun UnifiedPlayerSheet(
     val currentPlaybackQueue = playerUiSheetSlice.currentPlaybackQueue
     val currentQueueSourceName = playerUiSheetSlice.currentQueueSourceName
     val preparingSongId = playerUiSheetSlice.preparingSongId
-    val showDismissUndoBar = playerUiSheetSlice.showDismissUndoBar
 
     val currentSheetContentState by playerViewModel.sheetState.collectAsState()
     val predictiveBackCollapseProgress by playerViewModel.predictiveBackCollapseFraction.collectAsState()
@@ -394,6 +387,15 @@ fun UnifiedPlayerSheet(
     )
     val pendingSaveQueueOverlay = sheetModalOverlayController.pendingSaveQueueOverlay
     val selectedSongForInfo = sheetModalOverlayController.selectedSongForInfo
+    val sheetActionHandlers = rememberSheetActionHandlers(
+        scope = scope,
+        navController = navController,
+        playerViewModel = playerViewModel,
+        sheetMotionController = sheetMotionController,
+        queueSheetController = queueSheetController,
+        sheetModalOverlayController = sheetModalOverlayController,
+        sheetCollapsedTargetY = sheetCollapsedTargetY
+    )
 
     val hapticFeedback = LocalHapticFeedback.current
     val miniDismissGestureHandler = rememberMiniPlayerDismissGestureHandler(
@@ -466,6 +468,17 @@ fun UnifiedPlayerSheet(
     val playerAreaBackground = sheetThemeState.playerAreaBackground
     val effectivePlayerAreaElevation = sheetThemeState.effectivePlayerAreaElevation
     val miniAlpha = sheetThemeState.miniAlpha
+    val visualCardShadowElevation by remember(
+        effectivePlayerAreaElevation,
+        showQueueSheet,
+        playerContentExpansionFraction
+    ) {
+        derivedStateOf {
+            // Keep rich shadow in mini/collapsing states, but drop expensive blur when full player/queue are active.
+            if (showQueueSheet || playerContentExpansionFraction.value > 0.18f) 0.dp
+            else effectivePlayerAreaElevation
+        }
+    }
 
     val sheetInteractionState = rememberSheetInteractionState(
         scope = scope,
@@ -535,15 +548,16 @@ fun UnifiedPlayerSheet(
                                     alpha = miniReadyAlpha
                                     transformOrigin = TransformOrigin(0.5f, 1f)
                                 }
-                                .shadow(
-                                    elevation = effectivePlayerAreaElevation,
-                                    shape = RoundedCornerShape(
-                                        topStart = overallSheetTopCornerRadius,
-                                        topEnd = overallSheetTopCornerRadius,
-                                        bottomStart = playerContentActualBottomRadius,
-                                        bottomEnd = playerContentActualBottomRadius
-                                    ),
-                                    clip = false
+                                .then(
+                                    if (visualCardShadowElevation > 0.dp) {
+                                        Modifier.shadow(
+                                            elevation = visualCardShadowElevation,
+                                            shape = sheetInteractionState.playerShadowShape,
+                                            clip = false
+                                        )
+                                    } else {
+                                        Modifier
+                                    }
                                 )
                                 .background(
                                     color = playerAreaBackground,
@@ -583,12 +597,10 @@ fun UnifiedPlayerSheet(
                                 playerViewModel = playerViewModel,
                                 currentPositionProvider = positionToDisplayProvider,
                                 isFavorite = isFavorite,
-                                onShowQueueClicked = { queueSheetController.animate(true) },
-                                onQueueDragStart = { queueSheetController.beginDrag() },
-                                onQueueDrag = { queueSheetController.dragBy(it) },
-                                onQueueRelease = { totalDrag, velocity ->
-                                    queueSheetController.endDrag(totalDrag, velocity)
-                                },
+                                onShowQueueClicked = sheetActionHandlers.openQueueSheet,
+                                onQueueDragStart = sheetActionHandlers.beginQueueDrag,
+                                onQueueDrag = sheetActionHandlers.dragQueueBy,
+                                onQueueRelease = sheetActionHandlers.endQueueDrag,
                                 onShowCastClicked = castSheetState.openCastSheet
                             )
                         }
@@ -609,28 +621,21 @@ fun UnifiedPlayerSheet(
                         currentPositionProvider = positionToDisplayProvider,
                         isCastConnecting = isCastConnecting,
                         isFavorite = isFavorite,
-                        onShowQueueClicked = { queueSheetController.animate(true) },
-                        onQueueDragStart = { queueSheetController.beginDrag() },
-                        onQueueDrag = { queueSheetController.dragBy(it) },
-                        onQueueRelease = { totalDrag, velocity ->
-                            queueSheetController.endDrag(totalDrag, velocity)
-                        }
+                        onShowQueueClicked = sheetActionHandlers.openQueueSheet,
+                        onQueueDragStart = sheetActionHandlers.beginQueueDrag,
+                        onQueueDrag = sheetActionHandlers.dragQueueBy,
+                        onQueueRelease = sheetActionHandlers.endQueueDrag
                     )
-
-                    // Use granular showDismissUndoBar
-                    val isPlayerOrUndoBarVisible = showPlayerContentArea || showDismissUndoBar
-                    if (isPlayerOrUndoBarVisible) {
-                        // Spacer removed
-                    }
                 }
 
                 BackHandler(enabled = isQueueVisible && !internalIsKeyboardVisible) {
-                    queueSheetController.animate(false)
+                    sheetActionHandlers.animateQueueSheet(false)
                 }
 
 
                 UnifiedPlayerQueueAndSongInfoHost(
                     shouldRenderHost = !internalIsKeyboardVisible || selectedSongForInfo != null,
+                    isQueueTelemetryActive = showQueueSheet,
                     albumColorScheme = albumColorScheme,
                     queueScrimAlpha = queueScrimAlpha,
                     showQueueSheet = showQueueSheet,
@@ -642,41 +647,16 @@ fun UnifiedPlayerSheet(
                     currentPlaybackQueue = currentPlaybackQueue,
                     currentQueueSourceName = currentQueueSourceName,
                     infrequentPlayerState = infrequentPlayerState,
-                    activeTimerValueDisplay = activeTimerValueDisplayState,
-                    playCount = playCountState,
-                    isEndOfTrackTimerActive = isEndOfTrackTimerActiveState,
                     playerViewModel = playerViewModel,
                     selectedSongForInfo = selectedSongForInfo,
-                    onSelectedSongForInfoChange = { sheetModalOverlayController.updateSelectedSongForInfo(it) },
-                    onAnimateQueueSheet = { expanded -> queueSheetController.animate(expanded) },
-                    onBeginQueueDrag = { queueSheetController.beginDrag() },
-                    onDragQueueBy = { drag -> queueSheetController.dragBy(drag) },
-                    onEndQueueDrag = { totalDrag, velocity -> queueSheetController.endDrag(totalDrag, velocity) },
-                    onLaunchSaveQueueOverlay = { songs, defaultName, onConfirm ->
-                        sheetModalOverlayController.launchSaveQueueOverlay(songs, defaultName, onConfirm)
-                    },
-                    onNavigateToAlbum = { song ->
-                        scope.launch {
-                            sheetMotionController.snapCollapsed(sheetCollapsedTargetY)
-                        }
-                        playerViewModel.collapsePlayerSheet()
-                        queueSheetController.animate(false)
-                        sheetModalOverlayController.updateSelectedSongForInfo(null)
-                        if (song.albumId != -1L) {
-                            navController.navigate(Screen.AlbumDetail.createRoute(song.albumId))
-                        }
-                    },
-                    onNavigateToArtist = { song ->
-                        scope.launch {
-                            sheetMotionController.snapCollapsed(sheetCollapsedTargetY)
-                        }
-                        playerViewModel.collapsePlayerSheet()
-                        queueSheetController.animate(false)
-                        sheetModalOverlayController.updateSelectedSongForInfo(null)
-                        if (song.artistId != -1L) {
-                            navController.navigate(Screen.ArtistDetail.createRoute(song.artistId))
-                        }
-                    }
+                    onSelectedSongForInfoChange = sheetActionHandlers.onSelectedSongForInfoChange,
+                    onAnimateQueueSheet = sheetActionHandlers.animateQueueSheet,
+                    onBeginQueueDrag = sheetActionHandlers.beginQueueDrag,
+                    onDragQueueBy = sheetActionHandlers.dragQueueBy,
+                    onEndQueueDrag = sheetActionHandlers.endQueueDrag,
+                    onLaunchSaveQueueOverlay = sheetActionHandlers.onLaunchSaveQueueOverlay,
+                    onNavigateToAlbum = sheetActionHandlers.onNavigateToAlbum,
+                    onNavigateToArtist = sheetActionHandlers.onNavigateToArtist
                 )
 
             }

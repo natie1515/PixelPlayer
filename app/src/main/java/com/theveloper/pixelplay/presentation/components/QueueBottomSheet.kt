@@ -252,24 +252,22 @@ fun QueueBottomSheet(
     val settingsState by settingsViewModel.uiState.collectAsState()
     val showQueueHistory = settingsState.showQueueHistory
 
-    // Show full queue including history (Apple Music style) OR only from current song
-    // Only regenerate when queue changes, NOT when currentSongId changes
-    // This preserves item identity (UUIDs) for smooth scroll animation
-    val displayQueue = remember(queue, showQueueHistory, currentSongIndex) {
-        val songsToShow = if (showQueueHistory || currentSongIndex < 0) {
+    // Show full queue including history (Apple Music style) OR only from current song.
+    // Keep songs as plain data here; stable QueueUiItem ids are reconciled below.
+    val displaySongs = remember(queue, showQueueHistory, currentSongIndex) {
+        if (showQueueHistory || currentSongIndex < 0) {
             queue
         } else {
             queue.drop(currentSongIndex)
         }
-        songsToShow.map { QueueUiItem(song = it) }
     }
     
     // Offset to convert display indices to queue indices when history is hidden
     val queueIndexOffset = if (showQueueHistory || currentSongIndex < 0) 0 else currentSongIndex
 
     // Calculate the display index of the current song (depends on whether we show history or not)
-    val currentSongDisplayIndex = remember(displayQueue, currentSongId) {
-        displayQueue.indexOfFirst { it.song.id == currentSongId }
+    val currentSongDisplayIndex = remember(displaySongs, currentSongId) {
+        displaySongs.indexOfFirst { it.id == currentSongId }
     }
 
     val queueSnapshot = remember(queue) { queue.toList() }
@@ -278,15 +276,15 @@ fun QueueBottomSheet(
     val queueListScope = rememberCoroutineScope()
     var scrollToTopJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
-    var items by remember { mutableStateOf(displayQueue) }
+    var items by remember { mutableStateOf(displaySongs.map { QueueUiItem(song = it) }) }
     var justReordered by remember { mutableStateOf(false) }
     
     // Update items when queue changes, but skip if we just reordered to avoid flicker
-    LaunchedEffect(displayQueue) {
+    LaunchedEffect(displaySongs) {
         if (justReordered) {
             justReordered = false
         } else {
-            items = displayQueue
+            items = reconcileQueueUiItems(items, displaySongs)
         }
     }
     
@@ -370,7 +368,32 @@ fun QueueBottomSheet(
                 }
             }
 
-            items = displayQueue
+            items = reconcileQueueUiItems(items, displaySongs)
+        }
+    }
+
+    val useLightweightQueueListShape by remember {
+        derivedStateOf {
+            listState.isScrollInProgress ||
+                draggingSheetFromList ||
+                isReordering ||
+                reorderHandleInUse
+        }
+    }
+    val queueListShape = remember(useLightweightQueueListShape) {
+        if (useLightweightQueueListShape) {
+            RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
+        } else {
+            AbsoluteSmoothCornerShape(
+                cornerRadiusTR = 26.dp,
+                smoothnessAsPercentTR = 60,
+                cornerRadiusTL = 26.dp,
+                smoothnessAsPercentTL = 60,
+                cornerRadiusBR = 0.dp,
+                smoothnessAsPercentBR = 60,
+                cornerRadiusBL = 0.dp,
+                smoothnessAsPercentBL = 60
+            )
         }
     }
 
@@ -576,30 +599,10 @@ fun QueueBottomSheet(
                             state = listState,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .clip(
-                                    shape = AbsoluteSmoothCornerShape(
-                                        cornerRadiusTR = 26.dp,
-                                        smoothnessAsPercentTR = 60,
-                                        cornerRadiusTL = 26.dp,
-                                        smoothnessAsPercentTL = 60,
-                                        cornerRadiusBR = 0.dp,
-                                        smoothnessAsPercentBR = 60,
-                                        cornerRadiusBL = 0.dp,
-                                        smoothnessAsPercentBL = 60
-                                    )
-                                )
+                                .clip(shape = queueListShape)
                                 .background(
                                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    shape = AbsoluteSmoothCornerShape(
-                                        cornerRadiusTR = 26.dp,
-                                        smoothnessAsPercentTR = 60,
-                                        cornerRadiusTL = 26.dp,
-                                        smoothnessAsPercentTL = 60,
-                                        cornerRadiusBR = 0.dp,
-                                        smoothnessAsPercentBR = 60,
-                                        cornerRadiusBL = 0.dp,
-                                        smoothnessAsPercentBL = 60
-                                    )
+                                    shape = queueListShape
                                 )
                                 .then(
                                     if (isReordering || reorderHandleInUse) {
@@ -1938,6 +1941,33 @@ fun QueuePlaylistSongItem(
 
 @OptIn(ExperimentalMaterialApi::class)
 private enum class SwipeState { Resting, Dismissed }
+
+private fun reconcileQueueUiItems(
+    existingItems: List<QueueUiItem>,
+    songsToShow: List<Song>
+): List<QueueUiItem> {
+    if (songsToShow.isEmpty()) return emptyList()
+    if (existingItems.isEmpty()) return songsToShow.map { QueueUiItem(song = it) }
+
+    val reusableItemsBySongId = HashMap<String, kotlin.collections.ArrayDeque<QueueUiItem>>(existingItems.size)
+    existingItems.forEach { item ->
+        reusableItemsBySongId
+            .getOrPut(item.song.id) { kotlin.collections.ArrayDeque() }
+            .addLast(item)
+    }
+
+    return buildList(songsToShow.size) {
+        songsToShow.forEach { song ->
+            val bucket = reusableItemsBySongId[song.id]
+            val reusedItem = if (bucket != null && bucket.isNotEmpty()) bucket.removeFirst() else null
+            if (reusedItem != null) {
+                add(reusedItem.copy(song = song))
+            } else {
+                add(QueueUiItem(song = song))
+            }
+        }
+    }
+}
 
 /**
  * Immutable wrapper for queue items to ensure stable keys and prevent unnecessary recompositions.
