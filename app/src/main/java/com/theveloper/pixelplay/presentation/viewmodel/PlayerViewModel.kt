@@ -2871,9 +2871,9 @@ class PlayerViewModel @Inject constructor(
         if (isSwitchingBetweenRemotes || isRetryingFailedSameRoute) {
             castStateHolder.setPendingCastRouteId(route.id)
             castStateHolder.setCastConnecting(true)
-            val currentSession = sessionManager.currentCastSession
+            val currentSession = sessionManager?.currentCastSession
             if (currentSession != null) {
-                sessionManager.endCurrentSession(true)
+                sessionManager?.endCurrentSession(true)
             } else if (isRetryingFailedSameRoute) {
                 // Force route reselection flow when MediaRouter keeps the failed route selected.
                 castStateHolder.disconnect()
