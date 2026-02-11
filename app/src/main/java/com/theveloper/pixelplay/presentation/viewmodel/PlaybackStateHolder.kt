@@ -81,11 +81,21 @@ class PlaybackStateHolder @Inject constructor(
         if (castSession != null && remoteMediaClient != null) {
             if (remoteMediaClient.isPlaying) {
                 castStateHolder.castPlayer?.pause()
-                _stablePlayerState.update { it.copy(isPlaying = false) }
+                _stablePlayerState.update {
+                    it.copy(
+                        isPlaying = false,
+                        playWhenReady = false
+                    )
+                }
             } else {
                 if (remoteMediaClient.mediaQueue != null && remoteMediaClient.mediaQueue.itemCount > 0) {
                     castStateHolder.castPlayer?.play()
-                    _stablePlayerState.update { it.copy(isPlaying = true) }
+                    _stablePlayerState.update {
+                        it.copy(
+                            isPlaying = true,
+                            playWhenReady = true
+                        )
+                    }
                 } else {
                     Timber.w("Remote queue empty, cannot resume.")
                 }
@@ -291,7 +301,8 @@ class PlaybackStateHolder @Inject constructor(
                              it.copy(
                                  currentPosition = if (isRemotelySeeking) it.currentPosition else currentPosition,
                                  totalDuration = duration,
-                                 isPlaying = isRemotePlaying
+                                 isPlaying = isRemotePlaying,
+                                 playWhenReady = isRemotePlaying
                              )
                         }
                     }

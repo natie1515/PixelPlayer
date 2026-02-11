@@ -144,6 +144,9 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                     val isPlayingProvider = remember {
                         { latestInfrequentPlayerState.value.isPlaying }
                     }
+                    val playWhenReadyProvider = remember {
+                        { latestInfrequentPlayerState.value.playWhenReady }
+                    }
                     val repeatModeProvider = remember {
                         { latestInfrequentPlayerState.value.repeatMode }
                     }
@@ -184,6 +187,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         playerViewModel = playerViewModel,
                         currentPositionProvider = currentPositionProvider,
                         isPlayingProvider = isPlayingProvider,
+                        playWhenReadyProvider = playWhenReadyProvider,
                         repeatModeProvider = repeatModeProvider,
                         isShuffleEnabledProvider = isShuffleEnabledProvider,
                         totalDurationProvider = totalDurationProvider,
@@ -256,6 +260,7 @@ internal fun UnifiedPlayerPrewarmLayer(
                     playerViewModel = playerViewModel,
                     currentPositionProvider = currentPositionProvider,
                     isPlayingProvider = { infrequentPlayerState.isPlaying },
+                    playWhenReadyProvider = { infrequentPlayerState.playWhenReady },
                     repeatModeProvider = { infrequentPlayerState.repeatMode },
                     isShuffleEnabledProvider = { infrequentPlayerState.isShuffleEnabled },
                     totalDurationProvider = { infrequentPlayerState.totalDuration },

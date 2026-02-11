@@ -1639,7 +1639,8 @@ class PlayerViewModel @Inject constructor(
             it.copy(
                 isShuffleEnabled = it.isShuffleEnabled,
                 repeatMode = playerCtrl.repeatMode,
-                isPlaying = playerCtrl.isPlaying
+                isPlaying = playerCtrl.isPlaying,
+                playWhenReady = playerCtrl.playWhenReady
             )
         }
         preparePlaybackAudioMetadataForMedia(playerCtrl.currentMediaItem?.mediaId)
@@ -1681,7 +1682,13 @@ class PlayerViewModel @Inject constructor(
                     startProgressUpdates()
                 }
             } else {
-                playbackStateHolder.updateStablePlayerState { it.copy(currentSong = null, isPlaying = false) }
+                playbackStateHolder.updateStablePlayerState {
+                    it.copy(
+                        currentSong = null,
+                        isPlaying = false,
+                        playWhenReady = false
+                    )
+                }
                 _playerUiState.update { it.copy(currentPosition = 0L) }
                 resetPlaybackAudioMetadata()
             }
@@ -1694,7 +1701,12 @@ class PlayerViewModel @Inject constructor(
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isRemoteSessionControllingPlayback()) return
-                playbackStateHolder.updateStablePlayerState { it.copy(isPlaying = isPlaying) }
+                playbackStateHolder.updateStablePlayerState {
+                    it.copy(
+                        isPlaying = isPlaying,
+                        playWhenReady = playerCtrl.playWhenReady
+                    )
+                }
                 listeningStatsTracker.onPlayStateChanged(
                     isPlaying = isPlaying,
                     positionMs = playerCtrl.currentPosition.coerceAtLeast(0L)
@@ -1711,6 +1723,12 @@ class PlayerViewModel @Inject constructor(
                     }
                 }
             }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (isRemoteSessionControllingPlayback()) return
+                playbackStateHolder.updateStablePlayerState { it.copy(playWhenReady = playWhenReady) }
+            }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (isRemoteSessionControllingPlayback()) return
                 preparePlaybackAudioMetadataForMedia(mediaItem?.mediaId)
@@ -1753,7 +1771,8 @@ class PlayerViewModel @Inject constructor(
                                 currentSong = song,
                                 totalDuration = resolvedDuration,
                                 lyrics = null,
-                                isLoadingLyrics = song != null
+                                isLoadingLyrics = song != null,
+                                playWhenReady = playerCtrl.playWhenReady
                             )
                         }
                         _playerUiState.update { it.copy(currentPosition = 0L) }
@@ -1780,6 +1799,7 @@ class PlayerViewModel @Inject constructor(
                                 it.copy(
                                     currentSong = null,
                                     isPlaying = false,
+                                    playWhenReady = false,
                                     lyrics = null,
                                     isLoadingLyrics = false,
                                     totalDuration = 0L
@@ -1818,6 +1838,7 @@ class PlayerViewModel @Inject constructor(
                             it.copy(
                                 currentSong = null,
                                 isPlaying = false,
+                                playWhenReady = false,
                                 lyrics = null,
                                 isLoadingLyrics = false,
                                 totalDuration = 0L
@@ -1966,6 +1987,7 @@ class PlayerViewModel @Inject constructor(
                 state.copy(
                     currentSong = externalResult.song,
                     isPlaying = true,
+                    playWhenReady = true,
                     totalDuration = externalResult.song.duration,
                     lyrics = null,
                     isLoadingLyrics = false
@@ -2051,6 +2073,7 @@ class PlayerViewModel @Inject constructor(
                 it.copy(
                     currentSong = startSong,
                     isPlaying = true,
+                    playWhenReady = true,
                     totalDuration = startSong.duration.coerceAtLeast(0L)
                 )
             }
@@ -2066,6 +2089,7 @@ class PlayerViewModel @Inject constructor(
                 it.copy(
                     currentSong = startSong,
                     isPlaying = true,
+                    playWhenReady = true,
                     totalDuration = startSong.duration.coerceAtLeast(0L)
                 )
             }
@@ -2122,7 +2146,11 @@ class PlayerViewModel @Inject constructor(
     private fun loadAndPlaySong(song: Song) {
         beginPreparingSong(song)
         playbackStateHolder.updateStablePlayerState {
-            it.copy(currentSong = song, isPlaying = true)
+            it.copy(
+                currentSong = song,
+                isPlaying = true,
+                playWhenReady = true
+            )
         }
         _isSheetVisible.value = true
 
@@ -2606,7 +2634,12 @@ class PlayerViewModel @Inject constructor(
             val remoteMediaClient = castSession.remoteMediaClient!!
             if (remoteMediaClient.isPlaying) {
                 castStateHolder.castPlayer?.pause()
-                playbackStateHolder.updateStablePlayerState { it.copy(isPlaying = false) }
+                playbackStateHolder.updateStablePlayerState {
+                    it.copy(
+                        isPlaying = false,
+                        playWhenReady = false
+                    )
+                }
             } else {
                 val localQueue = _playerUiState.value.currentPlaybackQueue.toList()
                 val startSong = playbackStateHolder.stablePlayerState.value.currentSong ?: localQueue.firstOrNull()
@@ -2616,7 +2649,12 @@ class PlayerViewModel @Inject constructor(
 
                 if (shouldResumeRemoteQueue) {
                     castStateHolder.castPlayer?.play()
-                    playbackStateHolder.updateStablePlayerState { it.copy(isPlaying = true) }
+                    playbackStateHolder.updateStablePlayerState {
+                        it.copy(
+                            isPlaying = true,
+                            playWhenReady = true
+                        )
+                    }
                 } else if (localQueue.isNotEmpty() && startSong != null) {
                     Timber.tag(CAST_LOG_TAG).i(
                         "Remote queue out of sync. Reloading remote queue (local=%d status=%d snapshot=%d).",
@@ -2630,7 +2668,12 @@ class PlayerViewModel @Inject constructor(
                 } else if (remoteHasQueue) {
                     // No local queue available to reconcile; fallback to resuming remote queue.
                     castStateHolder.castPlayer?.play()
-                    playbackStateHolder.updateStablePlayerState { it.copy(isPlaying = true) }
+                    playbackStateHolder.updateStablePlayerState {
+                        it.copy(
+                            isPlaying = true,
+                            playWhenReady = true
+                        )
+                    }
                 } else {
                     Timber.tag(CAST_LOG_TAG).w("Cannot resume Cast playback: both local and remote queues are empty.")
                 }
@@ -3022,6 +3065,7 @@ class PlayerViewModel @Inject constructor(
                 it.copy(
                     currentSong = null,
                     isPlaying = false,
+                    playWhenReady = false,
                     totalDuration = 0L,
                     //isCurrentSongFavorite = false
                 )

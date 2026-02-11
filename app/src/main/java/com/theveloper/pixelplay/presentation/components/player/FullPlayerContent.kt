@@ -139,6 +139,7 @@ fun FullPlayerContent(
     // State Providers
     currentPositionProvider: () -> Long,
     isPlayingProvider: () -> Boolean,
+    playWhenReadyProvider: () -> Boolean,
     isFavoriteProvider: () -> Boolean,
     repeatModeProvider: () -> Int,
     isShuffleEnabledProvider: () -> Boolean,
@@ -308,8 +309,9 @@ fun FullPlayerContent(
     @Composable
     fun AlbumCoverSection(modifier: Modifier = Modifier) {
         val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delayAlbumCarousel
+        val shouldApplyPausedScale = !isPlayingProvider() && !playWhenReadyProvider()
         val albumArtScale by animateFloatAsState(
-            targetValue = if (isPlayingProvider()) 1f else 0.95f,
+            targetValue = if (shouldApplyPausedScale) 0.95f else 1f,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioNoBouncy,
                 stiffness = Spring.StiffnessLow
