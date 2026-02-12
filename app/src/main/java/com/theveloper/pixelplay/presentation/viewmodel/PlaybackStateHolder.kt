@@ -297,13 +297,23 @@ class PlaybackStateHolder @Inject constructor(
 
                         listeningStatsTracker.onProgress(currentPosition, isRemotePlaying)
 
-                        _stablePlayerState.update {
-                             it.copy(
-                                 currentPosition = if (isRemotelySeeking) it.currentPosition else currentPosition,
-                                 totalDuration = duration,
-                                 isPlaying = isRemotePlaying,
-                                 playWhenReady = isRemotePlaying
-                             )
+                        _stablePlayerState.update { state ->
+                            val nextPosition = if (isRemotelySeeking) state.currentPosition else currentPosition
+                            if (
+                                state.currentPosition == nextPosition &&
+                                state.totalDuration == duration &&
+                                state.isPlaying == isRemotePlaying &&
+                                state.playWhenReady == isRemotePlaying
+                            ) {
+                                state
+                            } else {
+                                state.copy(
+                                    currentPosition = nextPosition,
+                                    totalDuration = duration,
+                                    isPlaying = isRemotePlaying,
+                                    playWhenReady = isRemotePlaying
+                                )
+                            }
                         }
                     }
                 } else {
@@ -336,8 +346,12 @@ class PlaybackStateHolder @Inject constructor(
                          
                          listeningStatsTracker.onProgress(currentPosition, true)
                          
-                         _stablePlayerState.update {
-                             it.copy(currentPosition = currentPosition, totalDuration = duration)
+                         _stablePlayerState.update { state ->
+                             if (state.currentPosition == currentPosition && state.totalDuration == duration) {
+                                 state
+                             } else {
+                                 state.copy(currentPosition = currentPosition, totalDuration = duration)
+                             }
                         }
                      }
                 }

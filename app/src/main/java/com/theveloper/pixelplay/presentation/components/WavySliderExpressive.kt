@@ -31,9 +31,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +62,9 @@ fun WavySliderExpressive(
     waveSpeed: Dp = WavyProgressIndicatorDefaults.LinearDeterminateWavelength / 2f, // Slower wave as requested
 
     waveAmplitudeWhenPlaying: Dp = 4.dp,
-    thumbLineHeightWhenInteracting: Dp = 24.dp
+    thumbLineHeightWhenInteracting: Dp = 24.dp,
+    semanticsLabel: String? = null,
+    semanticsProgressStep: Float = 0.01f
 ) {
     val density = LocalDensity.current
     val strokeWidthPx = with(density) { strokeWidth.toPx() }
@@ -71,6 +79,13 @@ fun WavySliderExpressive(
         else ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
 
     val clampedValue = value.coerceIn(valueRange.start, valueRange.endInclusive)
+    val safeSemanticsStep = semanticsProgressStep.coerceIn(0.005f, 0.25f)
+    val semanticNormalizedValue = remember(normalizedValue, safeSemanticsStep) {
+        ((normalizedValue / safeSemanticsStep).roundToInt() * safeSemanticsStep).coerceIn(0f, 1f)
+    }
+    val semanticSliderValue = remember(semanticNormalizedValue, valueRange) {
+        valueRange.start + semanticNormalizedValue * (valueRange.endInclusive - valueRange.start)
+    }
     val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
     val isDragged by resolvedInteractionSource.collectIsDraggedAsState()
     val isPressed by resolvedInteractionSource.collectIsPressedAsState()
@@ -100,7 +115,27 @@ fun WavySliderExpressive(
             onValueChange = onValueChange,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(containerHeight),
+                .height(containerHeight)
+                // Keep slider accessible, but quantize semantic progress updates to reduce
+                // high-frequency semantics churn while visuals remain smooth.
+                .clearAndSetSemantics {
+                    if (!semanticsLabel.isNullOrBlank()) {
+                        contentDescription = semanticsLabel
+                    }
+                    progressBarRangeInfo = ProgressBarRangeInfo(
+                        current = semanticSliderValue,
+                        range = valueRange.start..valueRange.endInclusive,
+                        steps = 0
+                    )
+                    if (enabled) {
+                        setProgress { requested ->
+                            val coerced = requested.coerceIn(valueRange.start, valueRange.endInclusive)
+                            onValueChange(coerced)
+                            onValueChangeFinished?.invoke()
+                            true
+                        }
+                    }
+                },
             enabled = enabled,
             valueRange = valueRange,
             onValueChangeFinished = onValueChangeFinished,
@@ -119,7 +154,9 @@ fun WavySliderExpressive(
             progress = { normalizedValue },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = thumbRadius),
+                .padding(horizontal = thumbRadius)
+                // Decorative layer: avoid duplicate semantics updates from the visual track.
+                .clearAndSetSemantics { },
             color = activeTrackColor,
             trackColor = inactiveTrackColor,
             stroke = stroke,

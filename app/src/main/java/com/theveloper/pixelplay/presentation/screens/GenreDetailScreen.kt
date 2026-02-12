@@ -115,7 +115,7 @@ fun GenreDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val playerSheetState by playerViewModel.sheetState.collectAsState()
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+    val stablePlayerState by playerViewModel.stablePlayerStateInfrequent.collectAsState()
     val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsState()
     val playlistUiState by playlistViewModel.uiState.collectAsState()
     val libraryGenres by playerViewModel.genres.collectAsState()

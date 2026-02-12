@@ -105,7 +105,8 @@ fun PlayerSeekBar(
             inactiveTrackColor = primaryColor.copy(alpha = 0.2f),
             thumbColor = primaryColor,
             wavelength = 30.dp, // Was waveLength
-            isPlaying = isPlaying
+            isPlaying = isPlaying,
+            semanticsLabel = "Playback position"
         )
 //        Text(
 //            modifier = Modifier.weight(0.2f),

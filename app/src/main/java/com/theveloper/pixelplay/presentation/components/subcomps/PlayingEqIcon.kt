@@ -2,24 +2,20 @@ package com.theveloper.pixelplay.presentation.components.subcomps
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.isActive
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -35,28 +31,36 @@ fun PlayingEqIcon(
     wanderDurationMillis: Int = 8000,  // patrón más largo
     gapFraction: Float = 0.30f
 ) {
-    // Driver continuo (sigue corriendo en pausa para preservar el patrón)
-    val t = rememberInfiniteTransition(label = "eqDriver")
+    val fullRotation = (2f * PI).toFloat()
+    val phaseAnim = remember { Animatable(0f) }
+    val wanderAnim = remember { Animatable(0f) }
 
-    val phase by t.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = phaseDurationMillis, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "phase"
-    )
+    LaunchedEffect(isPlaying, phaseDurationMillis) {
+        if (!isPlaying) return@LaunchedEffect
+        while (isActive) {
+            val start = (phaseAnim.value % fullRotation).let { if (it < 0f) it + fullRotation else it }
+            phaseAnim.snapTo(start)
+            phaseAnim.animateTo(
+                targetValue = start + fullRotation,
+                animationSpec = tween(durationMillis = phaseDurationMillis, easing = LinearEasing)
+            )
+        }
+    }
 
-    val wander by t.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = wanderDurationMillis, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "wander"
-    )
+    LaunchedEffect(isPlaying, wanderDurationMillis) {
+        if (!isPlaying) return@LaunchedEffect
+        while (isActive) {
+            val start = (wanderAnim.value % fullRotation).let { if (it < 0f) it + fullRotation else it }
+            wanderAnim.snapTo(start)
+            wanderAnim.animateTo(
+                targetValue = start + fullRotation,
+                animationSpec = tween(durationMillis = wanderDurationMillis, easing = LinearEasing)
+            )
+        }
+    }
+
+    val phase = phaseAnim.value
+    val wander = wanderAnim.value
 
     // Factor de actividad: 1 = barras, 0 = puntitos (morph suave)
     val activity by animateFloatAsState(

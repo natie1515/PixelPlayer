@@ -108,16 +108,10 @@ fun UnifiedPlayerSheetV2(
         }
     }
 
-    val infrequentPlayerStateReference = remember {
-        playerViewModel.stablePlayerState
-            .map { it.copy(currentPosition = 0L) }
-            .distinctUntilChanged()
-    }.collectAsState(initial = StablePlayerState())
+    val infrequentPlayerStateReference = playerViewModel.stablePlayerStateInfrequent.collectAsState()
     val infrequentPlayerState = infrequentPlayerStateReference.value
 
-    val currentPositionState = remember {
-        playerViewModel.playerUiState.map { it.currentPosition }.distinctUntilChanged()
-    }.collectAsState(initial = 0L)
+    val currentPositionState = playerViewModel.currentPlaybackPosition.collectAsState()
     val remotePositionState = playerViewModel.remotePosition.collectAsState()
     val isRemotePlaybackActive by playerViewModel.isRemotePlaybackActive.collectAsState()
     val positionToDisplayProvider = remember(isRemotePlaybackActive) {

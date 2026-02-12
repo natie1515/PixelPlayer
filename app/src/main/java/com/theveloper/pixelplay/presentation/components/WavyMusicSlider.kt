@@ -30,6 +30,11 @@ import androidx.compose.ui.draw.drawWithCache // Importación necesaria
 import androidx.compose.ui.graphics.drawscope.DrawScope // Para el tipo de onDraw
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.util.lerp
 
 /**
@@ -79,7 +84,9 @@ fun WavyMusicSlider(
     isPlaying: Boolean = true,
     thumbLineHeightWhenInteracting: Dp = 24.dp,
     // NUEVO: permite desactivar la onda si el sheet no está expandido
-    isWaveEligible: Boolean = true
+    isWaveEligible: Boolean = true,
+    semanticsLabel: String? = null,
+    semanticsProgressStep: Float = 0.01f
 ) {
     val isDragged by interactionSource.collectIsDraggedAsState()
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -137,14 +144,33 @@ fun WavyMusicSlider(
     }
 
     val hapticFeedback = LocalHapticFeedback.current
+    val clampedValue = value.coerceIn(valueRange.start, valueRange.endInclusive)
+    val normalizedValue = if (valueRange.endInclusive == valueRange.start) {
+        0f
+    } else {
+        ((clampedValue - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+    }
+    val safeSemanticsStep = semanticsProgressStep.coerceIn(0.005f, 0.25f)
+    val semanticNormalizedValue = remember(normalizedValue, safeSemanticsStep) {
+        ((normalizedValue / safeSemanticsStep).roundToInt() * safeSemanticsStep).coerceIn(0f, 1f)
+    }
+    val semanticSliderValue = remember(semanticNormalizedValue, valueRange) {
+        valueRange.start + semanticNormalizedValue * (valueRange.endInclusive - valueRange.start)
+    }
 
     BoxWithConstraints(modifier = modifier.clipToBounds()) {
         val lastHapticStep = remember { mutableIntStateOf(-1) }
 
         Slider(
-            value = value,
+            value = clampedValue,
             onValueChange = { newValue ->
-                val currentStep = (newValue * 100 / (valueRange.endInclusive - valueRange.start)).toInt()
+                val normalizedNew = if (valueRange.endInclusive == valueRange.start) {
+                    0f
+                } else {
+                    ((newValue - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+                }
+                // Slightly coarser haptic granularity keeps tactile quality while reducing binder chatter.
+                val currentStep = (normalizedNew * 50f).roundToInt()
                 if (currentStep != lastHapticStep.intValue) {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     lastHapticStep.intValue = currentStep
@@ -153,7 +179,26 @@ fun WavyMusicSlider(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(sliderVisualHeight),
+                .height(sliderVisualHeight)
+                // Keep slider accessible but quantize semantic updates to avoid per-frame events.
+                .clearAndSetSemantics {
+                    if (!semanticsLabel.isNullOrBlank()) {
+                        contentDescription = semanticsLabel
+                    }
+                    progressBarRangeInfo = ProgressBarRangeInfo(
+                        current = semanticSliderValue,
+                        range = valueRange.start..valueRange.endInclusive,
+                        steps = 0
+                    )
+                    if (enabled) {
+                        setProgress { requested ->
+                            val coerced = requested.coerceIn(valueRange.start, valueRange.endInclusive)
+                            onValueChange(coerced)
+                            onValueChangeFinished?.invoke()
+                            true
+                        }
+                    }
+                },
             enabled = enabled,
             valueRange = valueRange,
             onValueChangeFinished = onValueChangeFinished,
@@ -176,7 +221,7 @@ fun WavyMusicSlider(
                     val localTrackEnd = canvasWidth - thumbRadiusPx
                     val localTrackWidth = (localTrackEnd - localTrackStart).coerceAtLeast(0f)
 
-                    val normalizedValue = value.let { v ->
+                    val normalizedValue = clampedValue.let { v ->
                         if (valueRange.endInclusive == valueRange.start) 0f
                         else ((v - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(
                             0f,

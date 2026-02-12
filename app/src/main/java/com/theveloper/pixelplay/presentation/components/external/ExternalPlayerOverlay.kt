@@ -69,8 +69,8 @@ fun ExternalPlayerOverlay(
     onDismiss: () -> Unit,
     onOpenFullPlayer: () -> Unit
 ) {
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
-    val playerUiState by playerViewModel.playerUiState.collectAsState()
+    val stablePlayerState by playerViewModel.stablePlayerStateInfrequent.collectAsState()
+    val playbackPosition by playerViewModel.currentPlaybackPosition.collectAsState()
     val remotePosition by playerViewModel.remotePosition.collectAsState()
     val isRemotePlaybackActive by playerViewModel.isRemotePlaybackActive.collectAsState()
     val navBarCornerRadius by playerViewModel.navBarCornerRadius.collectAsState()
@@ -160,7 +160,7 @@ fun ExternalPlayerOverlay(
                     }
                 } else {
                     val totalDuration = stablePlayerState.totalDuration.coerceAtLeast(0L)
-                    val rawPosition = if (isRemotePlaybackActive) remotePosition else playerUiState.currentPosition
+                    val rawPosition = if (isRemotePlaybackActive) remotePosition else playbackPosition
                     val position = rawPosition.coerceIn(0L, totalDuration)
                     val progressFraction = if (totalDuration > 0) position.toFloat() / totalDuration else 0f
 
@@ -271,7 +271,8 @@ fun ExternalPlayerOverlay(
                             },
                             waveLength = 30.dp,
                             isPlaying = stablePlayerState.isPlaying,
-                            isWaveEligible = true
+                            isWaveEligible = true,
+                            semanticsLabel = "Playback position"
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))

@@ -108,7 +108,7 @@ fun DailyMixScreen(
     val bottomBarHeightDp = NavBarContentHeight + systemNavBarInset
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
     val playerSheetState by playerViewModel.sheetState.collectAsState() // This is a simple enum, less critical but fine
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+    val stablePlayerState by playerViewModel.stablePlayerStateInfrequent.collectAsState()
     val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsState()
 
     val showAiSheet by playerViewModel.showAiPlaylistSheet.collectAsState()

@@ -102,7 +102,6 @@ import com.theveloper.pixelplay.presentation.screens.TabAnimation
 import com.theveloper.pixelplay.presentation.components.subcomps.FetchLyricsDialog
 import com.theveloper.pixelplay.presentation.components.subcomps.PlayerSeekBar
 import com.theveloper.pixelplay.presentation.viewmodel.LyricsSearchUiState
-import com.theveloper.pixelplay.presentation.viewmodel.PlayerUiState
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.utils.BubblesLine
@@ -115,6 +114,7 @@ import com.theveloper.pixelplay.utils.LyricsUtils
 import com.theveloper.pixelplay.presentation.components.subcomps.LyricsMoreBottomSheet
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 import java.io.File
@@ -132,7 +132,7 @@ import com.theveloper.pixelplay.presentation.components.subcomps.PlayingEqIcon
 @Composable
 fun LyricsSheet(
     stablePlayerStateFlow: StateFlow<StablePlayerState>,
-    playerUiStateFlow: StateFlow<PlayerUiState>,
+    playbackPositionFlow: Flow<Long>,
     lyricsSearchUiState: LyricsSearchUiState,
     resetLyricsForCurrentSong: () -> Unit,
     onSearchLyrics: (Boolean) -> Unit,
@@ -175,6 +175,7 @@ fun LyricsSheet(
 ) {
     BackHandler { onBackClick() }
     val stablePlayerState by stablePlayerStateFlow.collectAsState()
+    val playbackPosition by playbackPositionFlow.collectAsState(initial = 0L)
 
     val isLoadingLyrics by remember { derivedStateOf { stablePlayerState.isLoadingLyrics } }
     val lyrics by remember { derivedStateOf { stablePlayerState.lyrics } }
@@ -411,10 +412,11 @@ fun LyricsSheet(
         ) {
             val syncedListState = rememberLazyListState()
             val staticListState = rememberLazyListState()
-            val playerUiState by playerUiStateFlow.collectAsState()
             // Apply lyrics sync offset to the position flow
-            val positionFlow = remember(playerUiStateFlow, lyricsSyncOffset) {
-                playerUiStateFlow.map { (it.currentPosition + lyricsSyncOffset).coerceAtLeast(0L) }
+            val positionFlow = remember(playbackPositionFlow, lyricsSyncOffset) {
+                playbackPositionFlow
+                    .map { (it + lyricsSyncOffset).coerceAtLeast(0L) }
+                    .distinctUntilChanged()
             }
 
             LaunchedEffect(lyrics) {
@@ -691,7 +693,7 @@ fun LyricsSheet(
                         backgroundColor = backgroundColor, // Transparent as it's now inline
                         onBackgroundColor = onBackgroundColor,
                         primaryColor = accentColor,
-                        currentPosition = playerUiState.currentPosition,
+                        currentPosition = playbackPosition,
                         totalDuration = stablePlayerState.totalDuration,
                         onSeek = onSeekTo,
                         isPlaying = isPlaying,

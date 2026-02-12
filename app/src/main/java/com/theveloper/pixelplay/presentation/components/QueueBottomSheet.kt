@@ -228,11 +228,7 @@ fun QueueBottomSheet(
     var showClearQueueDialog by remember { mutableStateOf(false) }
     var isFabExpanded by rememberSaveable { mutableStateOf(false) }
 
-    val infrequentPlayerState by remember {
-        viewModel.stablePlayerState
-            .map { it.copy(currentPosition = 0L) }
-            .distinctUntilChanged()
-    }.collectAsState(initial = StablePlayerState())
+    val infrequentPlayerState by viewModel.stablePlayerStateInfrequent.collectAsState()
 
     val albumColorSchemePair by viewModel.currentAlbumArtColorSchemePair.collectAsState()
     val isDark = isSystemInDarkTheme()

@@ -144,7 +144,7 @@ fun PlaylistDetailScreen(
     navController: NavController
 ) {
     val uiState by playlistViewModel.uiState.collectAsState()
-    val playerStableState by playerViewModel.stablePlayerState.collectAsState()
+    val playerStableState by playerViewModel.stablePlayerStateInfrequent.collectAsState()
     val playerSheetState by playerViewModel.sheetState.collectAsState()
     val context = LocalContext.current
     val currentPlaylist = uiState.currentPlaylistDetails

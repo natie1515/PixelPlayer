@@ -489,7 +489,7 @@ fun SongListItemFavsWrapper(
     modifier: Modifier = Modifier
 ) {
     // Collect the stablePlayerState once
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+    val stablePlayerState by playerViewModel.stablePlayerStateInfrequent.collectAsState()
 
     // Derive isThisSongPlaying using remember
     val isThisSongPlaying = remember(song.id, stablePlayerState.currentSong?.id, stablePlayerState.isPlaying) {

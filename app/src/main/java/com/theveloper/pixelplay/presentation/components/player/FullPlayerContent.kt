@@ -174,8 +174,6 @@ fun FullPlayerContent(
     var showLyricsSheet by remember { mutableStateOf(false) }
     var showArtistPicker by rememberSaveable { mutableStateOf(false) }
     
-    // REMOVED: val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
-    
     val lyricsSearchUiState by playerViewModel.lyricsSearchUiState.collectAsState()
     val currentSongArtists by playerViewModel.currentSongArtists.collectAsState()
     val lyricsSyncOffset by playerViewModel.currentSongLyricsSyncOffset.collectAsState()
@@ -883,16 +881,9 @@ fun FullPlayerContent(
         enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
         exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut()
     ) {
-        // We can create a temporary StablePlayerState for LyricsSheet if needed, or update LyricsSheet to take Granular args.
-        // For now, let's keep LyricsSheet collecting stablePlayerState internally IF it must, OR better:
-        // Pass the subset we have.
-        // LyricsSheet signature: stablePlayerStateFlow: StateFlow<StablePlayerState>
-        // We can't change that easily without refactoring LyricsSheet too.
-        // For now, pass the flow but LyricsSheet is only visible when sheet is open.
-        // Ideally we should refactor LyricsSheet too, but let's stick to FullPlayerContent optimizations first.
         LyricsSheet(
-            stablePlayerStateFlow = playerViewModel.stablePlayerState,
-            playerUiStateFlow = playerViewModel.playerUiState,
+            stablePlayerStateFlow = playerViewModel.stablePlayerStateInfrequent,
+            playbackPositionFlow = playerViewModel.currentPlaybackPosition,
             lyricsSearchUiState = lyricsSearchUiState,
             resetLyricsForCurrentSong = {
                 showLyricsSheet = false
@@ -1320,6 +1311,7 @@ private fun EfficientSlider(
         inactiveTrackColor = inactiveTrackColor,
         thumbColor = thumbColor,
         isPlaying = isPlaying,
+        semanticsLabel = "Playback position",
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp, horizontal = 0.dp)
@@ -1334,13 +1326,17 @@ private fun EfficientTimeLabels(
     textColor: Color,
     audioMetaLabel: String?
 ) {
-    // Move state derivation inside the component but remember it based on inputs
-    // Actually, we can just use derivedStateOf here.
-    val posStr by remember(isVisible) { 
-        derivedStateOf { if (isVisible) formatDuration(positionState.value) else "--:--" } 
+    val coarsePositionMs by remember(isVisible, positionState) {
+        derivedStateOf {
+            if (!isVisible) 0L
+            else (positionState.value.coerceAtLeast(0L) / 1000L) * 1000L
+        }
     }
-    val durStr by remember(isVisible, duration) { 
-        derivedStateOf { if (isVisible) formatDuration(duration) else "--:--" } 
+    val posStr by remember(isVisible, coarsePositionMs) {
+        derivedStateOf { if (isVisible) formatDuration(coarsePositionMs) else "--:--" }
+    }
+    val durStr = remember(isVisible, duration) {
+        if (isVisible) formatDuration(duration.coerceAtLeast(0L)) else "--:--"
     }
 
     Box(

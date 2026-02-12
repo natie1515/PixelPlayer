@@ -147,16 +147,10 @@ fun UnifiedPlayerSheet(
         }
     }
 
-    val infrequentPlayerStateReference = remember {
-        playerViewModel.stablePlayerState
-            .map { it.copy(currentPosition = 0L) } // Keep totalDuration, only mask volatile position
-            .distinctUntilChanged()
-    }.collectAsState(initial = StablePlayerState())
+    val infrequentPlayerStateReference = playerViewModel.stablePlayerStateInfrequent.collectAsState()
     val infrequentPlayerState = infrequentPlayerStateReference.value
 
-    val currentPositionState = remember {
-        playerViewModel.playerUiState.map { it.currentPosition }.distinctUntilChanged()
-    }.collectAsState(initial = 0L)
+    val currentPositionState = playerViewModel.currentPlaybackPosition.collectAsState()
 
     val remotePositionState = playerViewModel.remotePosition.collectAsState()
     // We observe isRemotePlaybackActive directly as switching modes is a major event
