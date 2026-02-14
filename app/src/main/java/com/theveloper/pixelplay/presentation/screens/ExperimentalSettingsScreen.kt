@@ -2,6 +2,11 @@ package com.theveloper.pixelplay.presentation.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
@@ -19,11 +24,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -196,13 +203,16 @@ fun ExperimentalSettingsScreen(
                                 .fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            val delayAllEnabled = uiState.fullPlayerLoadingTweaks.delayAll
-                            val appearThresholdPercent = uiState.fullPlayerLoadingTweaks.contentAppearThresholdPercent
-                            val closeThresholdPercent = uiState.fullPlayerLoadingTweaks.contentCloseThresholdPercent
-                            val switchOnDragRelease = uiState.fullPlayerLoadingTweaks.switchOnDragRelease
-                            val isAnyDelayEnabled = uiState.fullPlayerLoadingTweaks.let {
+                            val loadingTweaks = uiState.fullPlayerLoadingTweaks
+                            val delayAllEnabled = loadingTweaks.delayAll
+                            val appearThresholdPercent = loadingTweaks.contentAppearThresholdPercent
+                            val closeThresholdPercent = loadingTweaks.contentCloseThresholdPercent
+                            val switchOnDragRelease = loadingTweaks.switchOnDragRelease
+                            val placeholdersEnabled = loadingTweaks.showPlaceholders
+                            val isAnyDelayEnabled = loadingTweaks.let {
                                 it.delayAll || it.delayAlbumCarousel || it.delaySongMetadata || it.delayProgressBar || it.delayControls
                             }
+                            val canUseTriggerMode = isAnyDelayEnabled && placeholdersEnabled
 
                             SwitchSettingItem(
                                 title = "Use Player Sheet V2",
@@ -218,6 +228,20 @@ fun ExperimentalSettingsScreen(
                                 }
                             )
 
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                            ) {
+                                Text(
+                                    text = "Step 1 · Choose what to delay",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                )
+                            }
+
                             SwitchSettingItem(
                                 title = "Delay everything",
                                 subtitle = "Hold the full player content until the sheet background is fully expanded.",
@@ -232,114 +256,86 @@ fun ExperimentalSettingsScreen(
                                 }
                             )
 
-                            SwitchSettingItem(
-                                title = "Album carousel",
-                                subtitle = "Delay album art and carousel until the sheet is expanded.",
-                                checked = uiState.fullPlayerLoadingTweaks.delayAlbumCarousel,
-                                onCheckedChange = settingsViewModel::setDelayAlbumCarousel,
-                                enabled = !delayAllEnabled,
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.ViewCarousel,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                            )
-
-                            SwitchSettingItem(
-                                title = "Song metadata",
-                                subtitle = "Delay title, artist, and lyrics/queue actions.",
-                                checked = uiState.fullPlayerLoadingTweaks.delaySongMetadata,
-                                onCheckedChange = settingsViewModel::setDelaySongMetadata,
-                                enabled = !delayAllEnabled,
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.LinearScale,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                            )
-
-                            SwitchSettingItem(
-                                title = "Progress bar",
-                                subtitle = "Delay the timeline and time labels until expansion completes.",
-                                checked = uiState.fullPlayerLoadingTweaks.delayProgressBar,
-                                onCheckedChange = settingsViewModel::setDelayProgressBar,
-                                enabled = !delayAllEnabled,
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Outlined.LinearScale,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                            )
-
-                            SwitchSettingItem(
-                                title = "Playback controls",
-                                subtitle = "Delay play/pause, seek, and favorite controls.",
-                                checked = uiState.fullPlayerLoadingTweaks.delayControls,
-                                onCheckedChange = settingsViewModel::setDelayControls,
-                                enabled = !delayAllEnabled,
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Outlined.PlayCircle,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                            )
-
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceContainer,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
+                            AnimatedVisibility(
+                                visible = !delayAllEnabled,
+                                enter = fadeIn() + expandVertically(),
+                                exit = fadeOut() + shrinkVertically()
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.LinearScale,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.secondary
-                                        )
-
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Expand threshold",
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = "Choose how expanded the sheet must be before delayed components become visible.",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    SwitchSettingItem(
+                                        title = "Album carousel",
+                                        subtitle = "Delay album art and carousel until the sheet is expanded.",
+                                        checked = loadingTweaks.delayAlbumCarousel,
+                                        onCheckedChange = settingsViewModel::setDelayAlbumCarousel,
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.ViewCarousel,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.secondary
                                             )
                                         }
-                                    }
-
-                                    Slider(
-                                        value = appearThresholdPercent.toFloat(),
-                                        onValueChange = { settingsViewModel.setFullPlayerAppearThreshold(it.roundToInt()) },
-                                        valueRange = 0f..100f,
-                                        steps = 99,
-                                        enabled = isAnyDelayEnabled && !switchOnDragRelease
                                     )
 
+                                    SwitchSettingItem(
+                                        title = "Song metadata",
+                                        subtitle = "Delay title, artist, and lyrics/queue actions.",
+                                        checked = loadingTweaks.delaySongMetadata,
+                                        onCheckedChange = settingsViewModel::setDelaySongMetadata,
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.LinearScale,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    )
+
+                                    SwitchSettingItem(
+                                        title = "Progress bar",
+                                        subtitle = "Delay the timeline and time labels until expansion completes.",
+                                        checked = loadingTweaks.delayProgressBar,
+                                        onCheckedChange = settingsViewModel::setDelayProgressBar,
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.LinearScale,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    )
+
+                                    SwitchSettingItem(
+                                        title = "Playback controls",
+                                        subtitle = "Delay play/pause, seek, and favorite controls.",
+                                        checked = loadingTweaks.delayControls,
+                                        onCheckedChange = settingsViewModel::setDelayControls,
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.PlayCircle,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = delayAllEnabled,
+                                enter = fadeIn() + expandVertically(),
+                                exit = fadeOut() + shrinkVertically()
+                            ) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                ) {
                                     Text(
-                                        text = "Content appears at ${appearThresholdPercent}% of expansion",
+                                        text = "All delayed components are active. Disable \"Delay everything\" to customize each part.",
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                                     )
                                 }
                             }
@@ -350,58 +346,18 @@ fun ExperimentalSettingsScreen(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.LinearScale,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.secondary
-                                        )
-
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Close threshold",
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = "Choose how much the sheet must collapse before placeholders take over while closing.",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    Slider(
-                                        value = closeThresholdPercent.toFloat(),
-                                        onValueChange = { settingsViewModel.setFullPlayerCloseThreshold(it.roundToInt()) },
-                                        valueRange = 0f..100f,
-                                        steps = 99,
-                                        enabled = isAnyDelayEnabled &&
-                                            uiState.fullPlayerLoadingTweaks.applyPlaceholdersOnClose &&
-                                            !switchOnDragRelease
-                                    )
-
-                                    Text(
-                                        text = "Placeholders appear after ${closeThresholdPercent}% collapse",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                                Text(
+                                    text = "Step 2 · Configure placeholder behavior",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                )
                             }
 
                             SwitchSettingItem(
                                 title = "Use placeholders for delayed items",
                                 subtitle = "Keep layout stable by rendering lightweight placeholders while components wait for expansion.",
-                                checked = uiState.fullPlayerLoadingTweaks.showPlaceholders,
+                                checked = placeholdersEnabled,
                                 onCheckedChange = settingsViewModel::setFullPlayerPlaceholders,
                                 leadingIcon = {
                                     Icon(
@@ -412,50 +368,231 @@ fun ExperimentalSettingsScreen(
                                 }
                             )
 
-                            SwitchSettingItem(
-                                title = "Also apply on player close",
-                                subtitle = "Show delayed placeholders immediately when the player starts collapsing.",
-                                checked = uiState.fullPlayerLoadingTweaks.applyPlaceholdersOnClose,
-                                onCheckedChange = settingsViewModel::setFullPlayerPlaceholdersOnClose,
-                                enabled = uiState.fullPlayerLoadingTweaks.showPlaceholders,
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Rectangle,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                            )
+                            AnimatedVisibility(
+                                visible = placeholdersEnabled,
+                                enter = fadeIn() + expandVertically(),
+                                exit = fadeOut() + shrinkVertically()
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceContainer,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(16.dp),
+                                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            Text(
+                                                text = "Step 3 · Choose when placeholders switch to real content",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = if (canUseTriggerMode) {
+                                                    "Select one mode. Threshold mode uses sliders; Drag release mode waits until you release the sheet gesture."
+                                                } else {
+                                                    "Enable at least one delayed component to unlock trigger mode."
+                                                },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
 
-                            SwitchSettingItem(
-                                title = "Switch on drag release",
-                                subtitle = "Ignore thresholds while dragging. Swap placeholders and content only after releasing the sheet drag gesture.",
-                                checked = switchOnDragRelease,
-                                onCheckedChange = settingsViewModel::setFullPlayerSwitchOnDragRelease,
-                                enabled = isAnyDelayEnabled && uiState.fullPlayerLoadingTweaks.showPlaceholders,
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Title,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                            )
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                TriggerModeOptionCard(
+                                                    title = "Threshold",
+                                                    subtitle = "Uses expansion percentage.",
+                                                    selected = !switchOnDragRelease,
+                                                    enabled = canUseTriggerMode,
+                                                    onClick = { settingsViewModel.setFullPlayerSwitchOnDragRelease(false) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                TriggerModeOptionCard(
+                                                    title = "Drag release",
+                                                    subtitle = "Switches only after gesture release.",
+                                                    selected = switchOnDragRelease,
+                                                    enabled = canUseTriggerMode,
+                                                    onClick = { settingsViewModel.setFullPlayerSwitchOnDragRelease(true) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                        }
+                                    }
 
-                            SwitchSettingItem(
-                                title = "Make placeholders transparent",
-                                subtitle = "Placeholders keep their layout space but become invisible.",
-                                checked = uiState.fullPlayerLoadingTweaks.transparentPlaceholders,
-                                onCheckedChange = settingsViewModel::setTransparentPlaceholders,
-                                enabled = uiState.fullPlayerLoadingTweaks.showPlaceholders,
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Visibility,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary
+                                    AnimatedVisibility(
+                                        visible = canUseTriggerMode && !switchOnDragRelease,
+                                        enter = fadeIn() + expandVertically(),
+                                        exit = fadeOut() + shrinkVertically()
+                                    ) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(10.dp))
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(16.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Rounded.LinearScale,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.secondary
+                                                        )
+
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = "Expand threshold",
+                                                                style = MaterialTheme.typography.titleMedium,
+                                                                color = MaterialTheme.colorScheme.onSurface
+                                                            )
+                                                            Text(
+                                                                text = "How expanded the sheet must be before delayed components become visible.",
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Slider(
+                                                        value = appearThresholdPercent.toFloat(),
+                                                        onValueChange = { settingsViewModel.setFullPlayerAppearThreshold(it.roundToInt()) },
+                                                        valueRange = 0f..100f,
+                                                        steps = 99,
+                                                        enabled = isAnyDelayEnabled
+                                                    )
+
+                                                    Text(
+                                                        text = "Content appears at ${appearThresholdPercent}% expansion",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+
+                                            SwitchSettingItem(
+                                                title = "Also apply on player close",
+                                                subtitle = "Use close threshold to switch back to placeholders while collapsing.",
+                                                checked = loadingTweaks.applyPlaceholdersOnClose,
+                                                onCheckedChange = settingsViewModel::setFullPlayerPlaceholdersOnClose,
+                                                enabled = isAnyDelayEnabled,
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.Rectangle,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.secondary
+                                                    )
+                                                }
+                                            )
+
+                                            AnimatedVisibility(
+                                                visible = loadingTweaks.applyPlaceholdersOnClose,
+                                                enter = fadeIn() + expandVertically(),
+                                                exit = fadeOut() + shrinkVertically()
+                                            ) {
+                                                Surface(
+                                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(16.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Outlined.LinearScale,
+                                                                contentDescription = null,
+                                                                tint = MaterialTheme.colorScheme.secondary
+                                                            )
+
+                                                            Column(modifier = Modifier.weight(1f)) {
+                                                                Text(
+                                                                    text = "Close threshold",
+                                                                    style = MaterialTheme.typography.titleMedium,
+                                                                    color = MaterialTheme.colorScheme.onSurface
+                                                                )
+                                                                Text(
+                                                                    text = "How much collapse is required before placeholders take over again.",
+                                                                    style = MaterialTheme.typography.bodyMedium,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                )
+                                                            }
+                                                        }
+
+                                                        Slider(
+                                                            value = closeThresholdPercent.toFloat(),
+                                                            onValueChange = { settingsViewModel.setFullPlayerCloseThreshold(it.roundToInt()) },
+                                                            valueRange = 0f..100f,
+                                                            steps = 99,
+                                                            enabled = isAnyDelayEnabled
+                                                        )
+
+                                                        Text(
+                                                            text = "Placeholders appear after ${closeThresholdPercent}% collapse",
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    AnimatedVisibility(
+                                        visible = canUseTriggerMode && switchOnDragRelease,
+                                        enter = fadeIn() + expandVertically(),
+                                        exit = fadeOut() + shrinkVertically()
+                                    ) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.surfaceContainer,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                        ) {
+                                            Text(
+                                                text = "Drag release mode bypasses thresholds and close behavior. The swap happens only when the sheet drag gesture ends.",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                            )
+                                        }
+                                    }
+
+                                    SwitchSettingItem(
+                                        title = "Make placeholders transparent",
+                                        subtitle = "Placeholders keep their layout space but become invisible.",
+                                        checked = loadingTweaks.transparentPlaceholders,
+                                        onCheckedChange = settingsViewModel::setTransparentPlaceholders,
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Visibility,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
                                     )
                                 }
-                            )
+                            }
                         }
                     }
                 }
@@ -568,5 +705,58 @@ fun ExperimentalSettingsScreen(
             onBackPressed = onNavigationIconClick,
             title = "Experimental"
         )
+    }
+}
+
+@Composable
+private fun TriggerModeOptionCard(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val containerColor = when {
+        !enabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        selected -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val titleColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+        selected -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val subtitleColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+        selected -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        color = containerColor,
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier
+            .defaultMinSize(minHeight = 94.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = titleColor
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = subtitleColor
+            )
+        }
     }
 }
