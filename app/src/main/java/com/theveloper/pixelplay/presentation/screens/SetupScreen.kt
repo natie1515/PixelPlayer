@@ -2,8 +2,11 @@
 package com.theveloper.pixelplay.presentation.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -107,6 +110,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -191,10 +195,24 @@ fun SetupScreen(
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
+    val currentPage = pages[pagerState.currentPage]
+    val isNextButtonEnabled = isPermissionGateSatisfied(context, currentPage, uiState)
+    var previousPageIndex by remember { mutableStateOf(0) }
 
     val directorySelectionPageIndex = remember(pages) { pages.indexOf(SetupPage.DirectorySelection) }
 
     LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage > previousPageIndex) {
+            val fromPage = pages[previousPageIndex]
+            if (!isPermissionGateSatisfied(context, fromPage, uiState)) {
+                setupViewModel.checkPermissions(context)
+                pagerState.scrollToPage(previousPageIndex)
+                Toast.makeText(context, "Please grant the required permission first.", Toast.LENGTH_SHORT).show()
+                return@LaunchedEffect
+            }
+        }
+        previousPageIndex = pagerState.currentPage
+
         if (pagerState.currentPage == directorySelectionPageIndex) {
             setupViewModel.loadMusicDirectories()
         }
@@ -211,19 +229,25 @@ fun SetupScreen(
             SetupBottomBar(
                 pagerState = pagerState,
                 animated = (pagerState.currentPage != 0),
+                isNextButtonEnabled = isNextButtonEnabled,
                 isFinishButtonEnabled = uiState.allPermissionsGranted,
                 onNextClicked = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                    val page = pages[pagerState.currentPage]
+                    if (isPermissionGateSatisfied(context, page, uiState)) {
+                        scope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                        }
+                    } else {
+                        setupViewModel.checkPermissions(context)
+                        Toast.makeText(context, "Please grant the required permission first.", Toast.LENGTH_SHORT).show()
                     }
                 },
                 onFinishClicked = {
-                    // Re-check permissions before finishing
-                    setupViewModel.checkPermissions(context)
-                    if (uiState.allPermissionsGranted) {
+                    if (allRequiredPermissionsGrantedNow(context)) {
                         setupViewModel.setSetupComplete()
                         onSetupComplete()
                     } else {
+                        setupViewModel.checkPermissions(context)
                         Toast.makeText(context, "Please grant all required permissions.", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -250,7 +274,10 @@ fun SetupScreen(
             ) {
                 when (page) {
                     SetupPage.Welcome -> WelcomePage()
-                    SetupPage.MediaPermission -> MediaPermissionPage(uiState)
+                    SetupPage.MediaPermission -> MediaPermissionPage(
+                        uiState = uiState,
+                        onPermissionStateUpdated = { setupViewModel.checkPermissions(context) }
+                    )
                     SetupPage.DirectorySelection -> DirectorySelectionPage(
                         uiState = uiState,
                         currentPath = currentPath,
@@ -271,7 +298,10 @@ fun SetupScreen(
                         onSelectionFinished = setupViewModel::applyPendingDirectoryRuleChanges,
                         onStorageSelected = setupViewModel::selectStorage
                     )
-                    SetupPage.NotificationsPermission -> NotificationsPermissionPage(uiState)
+                    SetupPage.NotificationsPermission -> NotificationsPermissionPage(
+                        uiState = uiState,
+                        onPermissionStateUpdated = { setupViewModel.checkPermissions(context) }
+                    )
                     SetupPage.AlarmsPermission -> AlarmsPermissionPage(uiState)
                     SetupPage.AllFilesPermission -> AllFilesPermissionPage(uiState)
                     SetupPage.BatteryOptimization -> BatteryOptimizationPage(
@@ -420,6 +450,65 @@ sealed class SetupPage {
     object Finish : SetupPage()
 }
 
+private fun isPermissionGateSatisfied(
+    context: Context,
+    page: SetupPage,
+    uiState: SetupUiState
+): Boolean {
+    return when (page) {
+        SetupPage.MediaPermission -> {
+            uiState.mediaPermissionGranted || hasMediaPermissionNow(context)
+        }
+        SetupPage.AllFilesPermission -> {
+            uiState.allFilesAccessGranted ||
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+                Environment.isExternalStorageManager()
+        }
+        SetupPage.NotificationsPermission -> {
+            uiState.notificationsPermissionGranted ||
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+        }
+        SetupPage.AlarmsPermission -> {
+            uiState.alarmsPermissionGranted || hasExactAlarmPermissionNow(context)
+        }
+        else -> true
+    }
+}
+
+private fun allRequiredPermissionsGrantedNow(context: Context): Boolean {
+    val mediaGranted = hasMediaPermissionNow(context)
+    val notificationsGranted =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+    val allFilesGranted =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+    val alarmsGranted = hasExactAlarmPermissionNow(context)
+
+    return mediaGranted && notificationsGranted && allFilesGranted && alarmsGranted
+}
+
+private fun hasMediaPermissionNow(context: Context): Boolean {
+    val mediaPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_AUDIO
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    return ContextCompat.checkSelfPermission(context, mediaPermission) == PackageManager.PERMISSION_GRANTED
+}
+
+private fun hasExactAlarmPermissionNow(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+    return alarmManager.canScheduleExactAlarms()
+}
+
 @Composable
 fun WelcomePage() {
     Column(
@@ -539,7 +628,10 @@ fun WelcomePage() {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun MediaPermissionPage(uiState: SetupUiState) {
+fun MediaPermissionPage(
+    uiState: SetupUiState,
+    onPermissionStateUpdated: () -> Unit
+) {
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         listOf(Manifest.permission.READ_MEDIA_AUDIO)
     } else {
@@ -556,6 +648,10 @@ fun MediaPermissionPage(uiState: SetupUiState) {
 
     // Sync the granted state with the ViewModel
     val isGranted = uiState.mediaPermissionGranted || permissionState.allPermissionsGranted
+
+    LaunchedEffect(permissionState.allPermissionsGranted) {
+        onPermissionStateUpdated()
+    }
 
     PermissionPageLayout(
         title = "Media Permission",
@@ -574,7 +670,10 @@ fun MediaPermissionPage(uiState: SetupUiState) {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun NotificationsPermissionPage(uiState: SetupUiState) {
+fun NotificationsPermissionPage(
+    uiState: SetupUiState,
+    onPermissionStateUpdated: () -> Unit
+) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
 
     val permissionState = rememberMultiplePermissionsState(permissions = listOf(Manifest.permission.POST_NOTIFICATIONS))
@@ -588,6 +687,10 @@ fun NotificationsPermissionPage(uiState: SetupUiState) {
 
     // Sync the granted state with the ViewModel
     val isGranted = uiState.notificationsPermissionGranted || permissionState.allPermissionsGranted
+
+    LaunchedEffect(permissionState.allPermissionsGranted) {
+        onPermissionStateUpdated()
+    }
 
     PermissionPageLayout(
         title = "Notifications",
@@ -1270,6 +1373,7 @@ fun SetupBottomBar(
     pagerState: PagerState,
     onNextClicked: () -> Unit,
     onFinishClicked: () -> Unit,
+    isNextButtonEnabled: Boolean,
     isFinishButtonEnabled: Boolean
 ) {
     // --- Animaciones para el Morphing y Rotación ---
@@ -1363,12 +1467,13 @@ fun SetupBottomBar(
                 }
 
                 val isLastPage = pagerState.currentPage == pagerState.pageCount - 1
-                val containerColor = if (isLastPage && !isFinishButtonEnabled) {
+                val isPrimaryButtonEnabled = if (isLastPage) isFinishButtonEnabled else isNextButtonEnabled
+                val containerColor = if (!isPrimaryButtonEnabled) {
                     MaterialTheme.colorScheme.surfaceContainerHighest
                 } else {
                     MaterialTheme.colorScheme.primaryContainer
                 }
-                val contentColor = if (isLastPage && !isFinishButtonEnabled) {
+                val contentColor = if (!isPrimaryButtonEnabled) {
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
                 } else {
                     MaterialTheme.colorScheme.onPrimaryContainer
