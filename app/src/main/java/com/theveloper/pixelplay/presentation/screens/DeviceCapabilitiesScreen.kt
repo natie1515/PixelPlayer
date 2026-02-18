@@ -196,7 +196,6 @@ fun DeviceCapabilitiesScreen(
         }
         
         // Top Bar
-        // Top Bar
         CollapsibleCommonTopBar(
             title = "Device Capabilities",
             collapseFraction = collapseFraction,
