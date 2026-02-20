@@ -33,11 +33,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +64,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.preferences.CollagePattern
 import com.theveloper.pixelplay.presentation.components.AlbumArtCollage
 import com.theveloper.pixelplay.presentation.components.BetaInfoBottomSheet
 import com.theveloper.pixelplay.presentation.components.ChangelogBottomSheet
@@ -223,11 +227,26 @@ fun HomeScreen(
                 // Collage
                 if (yourMixSongs.isNotEmpty()) {
                     item(key = "album_art_collage") {
+                        val basePattern = settingsUiState.collagePattern
+                        val isAutoRotate = settingsUiState.collageAutoRotate
+                        val patterns = remember { CollagePattern.entries }
+
+                        val activePattern = if (isAutoRotate) {
+                            var rotationIndex by rememberSaveable { mutableIntStateOf(-1) }
+                            LaunchedEffect(Unit) { rotationIndex++ }
+                            remember(rotationIndex) {
+                                patterns[rotationIndex.coerceAtLeast(0) % patterns.size]
+                            }
+                        } else {
+                            basePattern
+                        }
+
                         AlbumArtCollage(
                             modifier = Modifier.fillMaxWidth(),
                             songs = yourMixSongs,
                             padding = 14.dp,
                             height = 400.dp,
+                            pattern = activePattern,
                             onSongClick = { song ->
                                 playerViewModel.showAndPlaySong(song, yourMixSongs, "Your Mix")
                             }

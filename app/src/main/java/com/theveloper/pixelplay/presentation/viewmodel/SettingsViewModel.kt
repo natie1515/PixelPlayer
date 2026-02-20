@@ -19,6 +19,7 @@ import com.theveloper.pixelplay.data.preferences.ThemePreference
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.preferences.AlbumArtQuality
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
+import com.theveloper.pixelplay.data.preferences.CollagePattern
 import com.theveloper.pixelplay.data.preferences.FullPlayerLoadingTweaks
 import com.theveloper.pixelplay.data.repository.LyricsRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
@@ -80,7 +81,9 @@ data class SettingsUiState(
     val restorePlan: RestorePlan? = null,
     val backupHistory: List<BackupHistoryEntry> = emptyList(),
     val backupValidationErrors: List<ValidationError> = emptyList(),
-    val isInspectingBackup: Boolean = false
+    val isInspectingBackup: Boolean = false,
+    val collagePattern: CollagePattern = CollagePattern.default,
+    val collageAutoRotate: Boolean = false
 )
 
 data class FailedSongInfo(
@@ -193,6 +196,18 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             backupManager.getBackupHistory().collect { history ->
                 _uiState.update { it.copy(backupHistory = history) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.collagePatternFlow.collect { pattern ->
+                _uiState.update { it.copy(collagePattern = pattern) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.collageAutoRotateFlow.collect { autoRotate ->
+                _uiState.update { it.copy(collageAutoRotate = autoRotate) }
             }
         }
     }
@@ -409,6 +424,18 @@ class SettingsViewModel @Inject constructor(
     fun setAlbumArtPaletteStyle(style: AlbumArtPaletteStyle) {
         viewModelScope.launch {
             userPreferencesRepository.setAlbumArtPaletteStyle(style)
+        }
+    }
+
+    fun setCollagePattern(pattern: CollagePattern) {
+        viewModelScope.launch {
+            userPreferencesRepository.setCollagePattern(pattern)
+        }
+    }
+
+    fun setCollageAutoRotate(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setCollageAutoRotate(enabled)
         }
     }
 

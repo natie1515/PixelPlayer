@@ -197,6 +197,10 @@ constructor(
         // Album View Preference
         val IS_ALBUMS_LIST_VIEW = booleanPreferencesKey("is_albums_list_view")
 
+        // Collage Pattern
+        val COLLAGE_PATTERN = stringPreferencesKey("collage_pattern")
+        val COLLAGE_AUTO_ROTATE = booleanPreferencesKey("collage_auto_rotate")
+
         // Quick Settings / Last Playlist
         val LAST_PLAYLIST_ID = stringPreferencesKey("last_playlist_id")
         val LAST_PLAYLIST_NAME = stringPreferencesKey("last_playlist_name")
@@ -1930,6 +1934,30 @@ constructor(
                     }
                 }
             }
+        }
+    }
+
+    // --- Collage Pattern ---
+
+    val collagePatternFlow: Flow<CollagePattern> =
+        dataStore.data.map { preferences ->
+            CollagePattern.fromStorageKey(preferences[PreferencesKeys.COLLAGE_PATTERN])
+        }
+
+    suspend fun setCollagePattern(pattern: CollagePattern) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.COLLAGE_PATTERN] = pattern.storageKey
+        }
+    }
+
+    val collageAutoRotateFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.COLLAGE_AUTO_ROTATE] ?: false
+        }
+
+    suspend fun setCollageAutoRotate(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.COLLAGE_AUTO_ROTATE] = enabled
         }
     }
 

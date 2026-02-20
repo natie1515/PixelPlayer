@@ -4,8 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -26,7 +24,7 @@ import androidx.compose.ui.unit.dp
 import coil.request.ImageRequest
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
+import com.theveloper.pixelplay.data.preferences.CollagePattern
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +46,7 @@ fun AlbumArtCollage(
     modifier: Modifier = Modifier,
     height: Dp = 400.dp,
     padding: Dp = 0.dp,
+    pattern: CollagePattern = CollagePattern.default,
     onSongClick: (Song) -> Unit,
 ) {
     val context = LocalContext.current
@@ -76,16 +75,10 @@ fun AlbumArtCollage(
             .padding(padding)
     ) {
         val boxMaxHeight = maxHeight
-        val shapeConfigs by produceState<List<Config>>(initialValue = emptyList(), songsToShow, boxMaxHeight) {
+        val shapeConfigs by produceState<List<Config>>(initialValue = emptyList(), songsToShow, boxMaxHeight, pattern) {
             value = withContext(Dispatchers.Default) {
                 val min = minOf(300.dp, height)
-                listOf(
-                    Config(size = min * 0.8f, width = min * 0.48f, height = min * 0.8f, align = Alignment.Center, rot = 45f, shape = RoundedCornerShape(percent = 50), offsetX = 0.dp, offsetY = 0.dp),
-                    Config(size = min * 0.4f, width = min * 0.24f, height = min * 0.24f, align = Alignment.TopStart, rot = 0f, shape = CircleShape, offsetX = (300.dp * 0.05f), offsetY = (boxMaxHeight * 0.05f)),
-                    Config(size = min * 0.4f, width = min * 0.24f, height = min * 0.24f, align = Alignment.BottomEnd, rot = 0f, shape = CircleShape, offsetX = -(300.dp * 0.05f), offsetY = -(boxMaxHeight * 0.05f)),
-                    Config(size = min * 0.6f, width = min * 0.35f, height = min * 0.35f, align = Alignment.TopStart, rot = -20f, shape = RoundedCornerShape(20.dp), offsetX = (300.dp * 0.1f), offsetY = (boxMaxHeight * 0.1f)),
-                    Config(size = min * 0.9f, width = min * 0.9f, height = min * 0.9f, align = Alignment.BottomEnd, rot = 0f, shape = RoundedStarShape(sides = 6, curve = 0.09, rotation = 45f), offsetX = (42).dp, offsetY = 0.dp)
-                )
+                buildCollageConfigs(pattern, min, boxMaxHeight)
             }
         }
 

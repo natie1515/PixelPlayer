@@ -137,6 +137,7 @@ import com.theveloper.pixelplay.data.backup.model.BackupTransferProgressUpdate
 import com.theveloper.pixelplay.data.backup.model.ModuleRestoreDetail
 import com.theveloper.pixelplay.data.backup.model.RestorePlan
 import com.theveloper.pixelplay.data.preferences.AppThemeMode
+import com.theveloper.pixelplay.data.preferences.CollagePattern
 import com.theveloper.pixelplay.data.preferences.CarouselStyle
 import com.theveloper.pixelplay.data.preferences.LaunchTab
 import com.theveloper.pixelplay.data.preferences.LibraryNavigationMode
@@ -520,6 +521,26 @@ fun SettingsCategoryScreen(
                                     selectedKey = uiState.carouselStyle,
                                     onSelectionChanged = { settingsViewModel.setCarouselStyle(it) },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_view_carousel_24), null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                            }
+
+                            SettingsSubsection(title = "Home Collage") {
+                                ThemeSelectorItem(
+                                    label = "Collage Pattern",
+                                    description = "Choose the shape arrangement for the Your Mix collage.",
+                                    options = CollagePattern.entries.associate { it.storageKey to it.label },
+                                    selectedKey = uiState.collagePattern.storageKey,
+                                    onSelectionChanged = { key ->
+                                        settingsViewModel.setCollagePattern(CollagePattern.fromStorageKey(key))
+                                    },
+                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_view_column_24), null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                SwitchSettingItem(
+                                    title = "Auto-Rotate Patterns",
+                                    subtitle = "Cycle through collage patterns each time you visit Home.",
+                                    checked = uiState.collageAutoRotate,
+                                    onCheckedChange = { settingsViewModel.setCollageAutoRotate(it) },
+                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_shuffle_on_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                             }
 
