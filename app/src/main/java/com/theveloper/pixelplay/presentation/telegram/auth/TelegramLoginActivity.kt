@@ -150,7 +150,7 @@ fun TelegramLoginScreen(
                             onClick = onFinish,
                             modifier = Modifier.padding(start = 8.dp),
                             colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f),
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                                 contentColor = MaterialTheme.colorScheme.onSurface
                             )
                         ) {
@@ -284,7 +284,7 @@ private fun TelegramBrandingHeader() {
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                painter = painterResource(R.drawable.rounded_send_24),
+                painter = painterResource(R.drawable.telegram),
                 contentDescription = null,
                 modifier = Modifier.size(40.dp),
                 tint = MaterialTheme.colorScheme.onPrimary
@@ -817,9 +817,10 @@ private fun AuthStepHeader(
     title: String,
     subtitle: String
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(0.dp)
+    ){
         Box(
             modifier = Modifier
                 .size(56.dp)
@@ -835,25 +836,29 @@ private fun AuthStepHeader(
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.width(16.dp))
 
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
-            fontFamily = GoogleSansRounded,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+        Column(
+            horizontalAlignment = Alignment.Start
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
 
-        Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = GoogleSansRounded,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Start
+            )
+        }
     }
 }
 
