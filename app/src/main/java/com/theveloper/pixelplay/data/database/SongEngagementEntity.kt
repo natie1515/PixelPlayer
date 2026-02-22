@@ -2,6 +2,7 @@ package com.theveloper.pixelplay.data.database
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
@@ -9,7 +10,12 @@ import androidx.room.PrimaryKey
  * This replaces the JSON-based storage in DailyMixManager for better performance
  * and structured querying.
  */
-@Entity(tableName = "song_engagements")
+@Entity(
+    tableName = "song_engagements",
+    indices = [
+        Index(value = ["play_count"], unique = false)
+    ]
+)
 data class SongEngagementEntity(
     @PrimaryKey
     @ColumnInfo(name = "song_id")

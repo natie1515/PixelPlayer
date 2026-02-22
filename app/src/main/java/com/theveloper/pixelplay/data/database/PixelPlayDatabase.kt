@@ -24,7 +24,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GDriveSongEntity::class,
         GDriveFolderEntity::class
     ],
-    version = 23, // Incremented for artist custom image support
+    version = 24, // Incremented for query performance indexes
 
     exportSchema = false
 )
@@ -444,6 +444,19 @@ abstract class PixelPlayDatabase : RoomDatabase() {
         val MIGRATION_22_23 = object : Migration(22, 23) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE artists ADD COLUMN custom_image_uri TEXT DEFAULT NULL")
+            }
+        }
+
+        /**
+         * Add missing indexes for frequently filtered and sorted queries.
+         */
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_content_uri_string ON songs(content_uri_string)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_date_added ON songs(date_added)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_duration ON songs(duration)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_favorites_timestamp ON favorites(timestamp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_song_engagements_play_count ON song_engagements(play_count)")
             }
         }
     }
