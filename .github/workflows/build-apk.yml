@@ -45,5 +45,5 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PixelPlayer-debug-apk
+          name: MyTunes-debug-apk
           path: app/build/outputs/apk/**/*.apk
